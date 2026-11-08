@@ -10,7 +10,7 @@ import { SimulationTab } from './SimulationTab';
 import { WateringDataTab } from './WateringDataTab';
 import { useSaveSettings, type SaveState } from './useSaveSettings';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { Alert02Icon, CheckmarkCircle02Icon, Loader } from '@hugeicons/core-free-icons';
+import { Alert02Icon, CheckmarkCircle02Icon, LoaderIcon } from '@hugeicons/core-free-icons';
 
 export type TabId = 'automation' | 'watering-data' | 'notifications' | 'device' | 'simulation';
 
@@ -34,7 +34,7 @@ function SaveStatus({ state }: { state: SaveState }) {
     <p className="flex min-h-6 items-center gap-2 text-sm text-ink-3" role="status" aria-live="polite">
       {state === 'saving' && (
         <>
-          <HugeiconsIcon icon={Loader} size={15} aria-hidden className="motion-safe:animate-spin" /> Guardando…
+          <HugeiconsIcon icon={LoaderIcon} size={15} aria-hidden className="motion-safe:animate-spin" /> Guardando…
         </>
       )}
       {state === 'saved' && (
