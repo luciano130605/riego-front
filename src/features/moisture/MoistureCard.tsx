@@ -1,6 +1,6 @@
 import { offlineSince, SENSOR, SENSOR_STATE, STATUS_TEXT, type StatusKey } from '@/core/copy';
 import { formatAgo, longDateTime } from '@/core/format';
-import { useDerived, useDeviceView, useSnapshot } from '@/data/hooks';
+import { useAutomation, useDerived, useDeviceView, useSnapshot } from '@/data/hooks';
 import { cn } from '@/lib/cn';
 import { Card, CardTitle } from '@/ui/Card';
 import { Skeleton } from '@/ui/Skeleton';
@@ -19,9 +19,10 @@ const STATUS_VIEW: Record<StatusKey, { icon: IconSvgElement; tone: string }> = {
  * (`device.sensor`) y la última lectura, con el valor crudo y la hora de la MISMA lectura que usa el panel de la placa.
  * No decide nada mirando el valor crudo.
  */
-export function MoistureCard() {
+export function MoistureCard({ className }: { className?: string }) {
   const snapshot = useSnapshot();
   const { status } = useDerived();
+  const auto = useAutomation();
   const { online, offlineForMs, lastReading: reading, sensor, now } = useDeviceView();
 
   if (snapshot.load === 'loading') {
@@ -67,7 +68,7 @@ export function MoistureCard() {
   const pct = reading ? Math.min(100, Math.max(0, Math.round(reading.moisture))) : 0;
 
   return (
-    <Card aria-labelledby="humedad-titulo" className="flex min-h-[15.5rem] flex-col">
+    <Card aria-labelledby="humedad-titulo" className={cn('flex min-h-[15.5rem] flex-col', className)}>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <CardTitle id="humedad-titulo">Humedad del suelo</CardTitle>
@@ -115,7 +116,7 @@ export function MoistureCard() {
           <div className="relative mt-1 h-4 text-xs text-ink-3 tabular-nums">
             <span className="absolute left-0">0 %</span>
             <span className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: `${Math.min(Math.max(threshold, 12), 88)}%` }}>
-              Riega bajo {threshold} %
+              {auto.thresholdLabel(threshold)}
             </span>
             <span className="absolute right-0">100 %</span>
           </div>

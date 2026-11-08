@@ -1,8 +1,8 @@
 import { AVISO } from '@/core/copy';
 import { API_URL } from '@/data/env';
-import { useDerived, useSnapshot } from '@/data/hooks';
+import { useAutomation, useDerived, useSnapshot } from '@/data/hooks';
 import { NotificationsButton } from '@/features/notifications/NotificationsButton';
-import { useSaveSettings } from '@/features/settings/useSaveSettings';
+import { useSaveSettings, useSettingsSaving } from '@/features/settings/useSaveSettings';
 import type { TabId } from '@/features/settings/SettingsDialog';
 import { cn } from '@/lib/cn';
 import { IconButton } from '@/ui/Button';
@@ -18,6 +18,8 @@ export function Header({ onOpenSettings }: Props) {
   const snapshot = useSnapshot();
   const derived = useDerived();
   const { save } = useSaveSettings();
+  const saving = useSettingsSaving();
+  const automation = useAutomation();
   const loading = snapshot.load === 'loading';
   const { auto } = snapshot.settings;
   const aviso = derived.relayMode === 'aviso';
@@ -25,7 +27,7 @@ export function Header({ onOpenSettings }: Props) {
   return (
     // Mobile: título y los dos botones arriba, el subtítulo abajo y, en una sola fila, el estado y el interruptor.
     // Desde lg: todo en una línea, como siempre.
-    <header className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-x-2 gap-y-3 lg:flex lg:flex-wrap lg:items-center lg:gap-x-3 lg:gap-y-4">
+    <header className="grid grid-cols-[minmax(0,1fr)_automationauto] items-start gap-x-2 gap-y-3 lg:flex lg:flex-wrap lg:items-center lg:gap-x-3 lg:gap-y-4">
       <div className="contents lg:mr-auto lg:block lg:min-w-0 lg:pr-3">
         <div className="col-start-1 row-start-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <h1 className="text-[28px] leading-tight font-semibold tracking-tight sm:text-3xl">Mi planta</h1>
@@ -61,7 +63,7 @@ export function Header({ onOpenSettings }: Props) {
           )}
         </div>
         <p className="col-span-3 row-start-2 text-[15px] text-ink-2 lg:mt-0.5">
-          {aviso ? AVISO.line : 'Monitoreo y riego automático'}
+          {aviso ? AVISO.line : automation.subtitle}
         </p>
       </div>
 
@@ -83,6 +85,8 @@ export function Header({ onOpenSettings }: Props) {
           ) : (
             <Switch
               checked={auto}
+              // El cambio no se da por hecho hasta que la API confirma: mientras tanto el interruptor queda quieto.
+              disabled={saving}
               label={aviso ? AVISO.switchAria : 'Riego automático'}
               onChange={(next) =>
                 void save(

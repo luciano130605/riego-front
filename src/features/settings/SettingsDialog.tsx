@@ -1,6 +1,6 @@
 import { useId, useRef, type KeyboardEvent } from 'react';
 import { API_URL } from '@/data/env';
-import { useLab } from '@/data/hooks';
+import { useAutomation, useLab } from '@/data/hooks';
 import { cn } from '@/lib/cn';
 import { Dialog } from '@/ui/Dialog';
 import { AutomationTab } from './AutomationTab';
@@ -8,7 +8,7 @@ import { DeviceTab } from './DeviceTab';
 import { NotificationsTab } from './NotificationsTab';
 import { SimulationTab } from './SimulationTab';
 import { WateringDataTab } from './WateringDataTab';
-import { useSaveSettings, type SaveState } from './useSaveSettings';
+import { useSaveSettings, useSettingsSaving, type SaveState } from './useSaveSettings';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Alert02Icon, CheckmarkCircle02Icon, LoaderIcon } from '@hugeicons/core-free-icons';
 
@@ -55,11 +55,16 @@ function SaveStatus({ state }: { state: SaveState }) {
 /** Configuración en un diálogo: automatización, datos de riego, estado del equipo y (con datos de prueba) simulación. */
 export function SettingsDialog({ open, tab, onTab, onClose }: Props) {
   const lab = useLab();
+  const auto = useAutomation();
   const { save, state } = useSaveSettings();
+  const saving = useSettingsSaving();
   const baseId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   // La simulación solo existe con datos del simulador y sin backend configurado (VITE_API_URL).
-  const tabs = TABS.filter((t) => t.id !== 'simulation' || (lab && !API_URL));
+  // Datos de riego es del automático: apagado, la pestaña no existe. Si estabas ahí, vuelve a Automatización.
+  const tabs = TABS.filter(
+    (t) => (t.id !== 'simulation' || (lab && !API_URL)) && (t.id !== 'watering-data' || auto.show.wateringData),
+  );
   const current = tabs.some((t) => t.id === tab) ? tab : 'automation';
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -112,7 +117,7 @@ export function SettingsDialog({ open, tab, onTab, onClose }: Props) {
       </div>
 
       <div role="tabpanel" id={`${baseId}-panel-${current}`} aria-labelledby={`${baseId}-tab-${current}`}>
-        {current === 'automation' && <AutomationTab save={save} />}
+        {current === 'automation' && <AutomationTab save={save} saving={saving} />}
         {current === 'notifications' && <NotificationsTab />}
         {current === 'device' && <DeviceTab save={save} />}
         {current === 'watering-data' && <WateringDataTab />}

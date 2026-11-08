@@ -2,55 +2,104 @@ import { SOAK_MIN } from '@/core/cycles';
 import { AVISO } from '@/core/copy';
 import { formatSeconds } from '@/core/format';
 import type { Settings } from '@/core/types';
-import { useRelayMode, useSnapshot } from '@/data/hooks';
+import { useAutomation, useRelayMode, useSnapshot } from '@/data/hooks';
+import { Skeleton } from '@/ui/Skeleton';
 import { Segmented } from '@/ui/Segmented';
 import { Stepper } from '@/ui/Stepper';
 import { Switch } from '@/ui/Switch';
 import { SettingRow, SettingsSection } from './SettingRow';
 
-type Props = { save: (patch: Partial<Settings>, okMessage?: string) => Promise<boolean> };
+type Props = {
+  save: (patch: Partial<Settings>, okMessage?: string) => Promise<boolean>;
+  /** Hay un cambio en camino: el interruptor queda quieto hasta que la API confirma. */
+  saving?: boolean;
+};
 
-export function AutomationTab({ save }: Props) {
+export function AutomationTab({ save, saving }: Props) {
   const { settings: s } = useSnapshot();
+  const auto = useAutomation();
   const until = s.mode === 'until-target';
   const aviso = useRelayMode() === 'aviso';
+
+  // El interruptor y su línea corta: es lo único que queda en manual. Los valores de abajo siguen guardados.
+  const header = aviso ? (
+    <SettingsSection title="Avisos">
+      <SettingRow label={AVISO.switchLabel} hint={AVISO.line}>
+        <Switch
+          checked={s.auto}
+          disabled={saving}
+          label={AVISO.switchAria}
+          onChange={(next) => void save({ auto: next }, next ? AVISO.on : AVISO.off)}
+        />
+      </SettingRow>
+    </SettingsSection>
+  ) : (
+    <SettingsSection title="Riego automático">
+      <SettingRow label="Regar solo" hint="Riega cuando la tierra lo necesita. Apagado, el riego es manual.">
+        <Switch
+          checked={s.auto}
+          disabled={saving}
+          label="Riego automático"
+          onChange={(next) => void save({ auto: next }, next ? 'Riego automático activado.' : 'Riego automático apagado.')}
+        />
+      </SettingRow>
+    </SettingsSection>
+  );
+
+  // Umbral y objetivo de humedad: además del riego automático, son los de los avisos al celular, así que se ven siempre.
+  const alertsSection = (
+      <SettingsSection title="Cuándo avisar">
+        <SettingRow label="Avisar cuando baje de" hint="La humedad que dispara el aviso.">
+          <Stepper
+            label="humedad que dispara el aviso"
+            display={`${s.thresholdPct} %`}
+            value={s.thresholdPct}
+            min={10}
+            max={70}
+            onChange={(thresholdPct) => void save({ thresholdPct })}
+          />
+        </SettingRow>
+        <SettingRow label="Humedad objetivo" hint="Hasta cuánto conviene regar a mano. Se muestra en el aviso.">
+          <Stepper
+            label="humedad objetivo"
+            display={`${s.targetPct} %`}
+            value={s.targetPct}
+            min={s.thresholdPct + 5}
+            max={95}
+            onChange={(targetPct) => void save({ targetPct })}
+          />
+        </SettingRow>
+      </SettingsSection>
+  );
+
+  // Hasta que llegan los datos no se sabe en qué modo está: se usa el estado de carga de siempre.
+  if (auto.loading) {
+    return (
+      <div aria-busy="true" aria-label="Automatización">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="mt-3 h-20 w-full" />
+      </div>
+    );
+  }
+
+  // Automático apagado: el interruptor y lo que usan los avisos. Lo demás queda guardado, oculto.
+  if (!auto.show.autoSettings) {
+    return (
+      <div>
+        {header}
+
+        {auto.show.alertThresholds && alertsSection}
+      </div>
+    );
+  }
 
   if (aviso) {
     // Sin regador conectado no hay nada que regar solo: solo se configuran los avisos.
     return (
       <div>
-        <SettingsSection title="Avisos">
-          <SettingRow label={AVISO.switchLabel} hint={AVISO.line}>
-            <Switch
-              checked={s.auto}
-              label={AVISO.switchAria}
-              onChange={(auto) => void save({ auto }, auto ? AVISO.on : AVISO.off)}
-            />
-          </SettingRow>
-        </SettingsSection>
+        {header}
 
-        <SettingsSection title="Cuándo avisar">
-          <SettingRow label="Avisar cuando baje de" hint="La humedad que dispara el aviso.">
-            <Stepper
-              label="humedad que dispara el aviso"
-              display={`${s.thresholdPct} %`}
-              value={s.thresholdPct}
-              min={10}
-              max={70}
-              onChange={(thresholdPct) => void save({ thresholdPct })}
-            />
-          </SettingRow>
-          <SettingRow label="Humedad objetivo" hint="Hasta cuánto conviene regar a mano. Se muestra en el aviso.">
-            <Stepper
-              label="humedad objetivo"
-              display={`${s.targetPct} %`}
-              value={s.targetPct}
-              min={s.thresholdPct + 5}
-              max={95}
-              onChange={(targetPct) => void save({ targetPct })}
-            />
-          </SettingRow>
-        </SettingsSection>
+        {alertsSection}
 
         <p className="mt-5 text-sm text-ink-3">
           El riego automático (modo, tandas, tope de seguridad y límites) se configura cuando haya un regador
@@ -62,20 +111,7 @@ export function AutomationTab({ save }: Props) {
 
   return (
     <div>
-      <SettingsSection title="Riego automático">
-        <SettingRow
-          label="Regar solo"
-          hint="Riega cuando la tierra lo necesita. Apagado, solo riega con “Regar ahora”."
-        >
-          <Switch
-            checked={s.auto}
-            label="Riego automático"
-            onChange={(auto) =>
-              void save({ auto }, auto ? 'Riego automático activado.' : 'Riego automático apagado.')
-            }
-          />
-        </SettingRow>
-      </SettingsSection>
+      {header}
 
       <SettingsSection title="Cuánto regar">
         <div className="pb-4">

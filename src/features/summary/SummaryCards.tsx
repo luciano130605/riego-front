@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import { AVISO, automationState, modeDescription } from '@/core/copy';
+import { AUTO_MODE, AVISO, automationState, modeDescription } from '@/core/copy';
 import { dayLabel, num, timeHM } from '@/core/format';
-import { useDerived, useSnapshot } from '@/data/hooks';
+import { useAutomation, useDerived, useSnapshot } from '@/data/hooks';
 import { cn } from '@/lib/cn';
 import { StatCard } from './StatCard';
 import { ArrowDown02Icon, ArrowUp02Icon, Clock02Icon, Notification01Icon, SoilMoistureFieldIcon, WaterEnergyIcon } from '@hugeicons/core-free-icons';
@@ -83,6 +83,21 @@ export function OperationMode() {
   const { auto } = snapshot.settings;
   const state = automationState(decision, auto);
   const { relayMode } = useDerived();
+  const automation = useAutomation();
+
+  // Automático apagado: "Manual", sin estados de las reglas (en espera, pausa...). Sin regador, igual es manual.
+  if (!automation.loading && !automation.autoEnabled) {
+    return (
+      <StatCard
+        loading={false}
+        icon={relayMode === 'aviso' ? Notification01Icon : WaterEnergyIcon}
+        iconClass="text-ink-3"
+        label="Modo"
+        value={AUTO_MODE.manualValue}
+        detail={relayMode === 'aviso' ? AUTO_MODE.avisoOffDetail : modeDescription(snapshot.settings)}
+      />
+    );
+  }
 
   if (relayMode === 'aviso') {
     // Sin regador conectado: no hay nada que "riegue solo", solo avisos.

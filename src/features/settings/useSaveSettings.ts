@@ -1,9 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Settings } from '@/core/types';
 import { useRiegoApi } from '@/data/hooks';
 import { useToast } from '@/ui/toastContext';
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+
+// Cuántos guardados hay en camino en toda la app: el encabezado y Configuración comparten el interruptor.
+let pending = 0;
+const listeners = new Set<() => void>();
+const track = (delta: number) => {
+  pending += delta;
+  listeners.forEach((l) => l());
+};
+const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => void listeners.delete(l);
+};
+
+/** true mientras cualquier cambio de ajustes espera la confirmación de la API. */
+export function useSettingsSaving(): boolean {
+  return useSyncExternalStore(subscribe, () => pending > 0);
+}
 
 /**
  * Guarda ajustes por la API y cuenta qué pasó de verdad: si falla, se avisa
@@ -21,7 +38,13 @@ export function useSaveSettings() {
     async (patch: Partial<Settings>, okMessage?: string): Promise<boolean> => {
       clearTimeout(timer.current);
       setState('saving');
-      const result = await api.updateSettings(patch);
+      track(1);
+      let result: Awaited<ReturnType<typeof api.updateSettings>>;
+      try {
+        result = await api.updateSettings(patch);
+      } finally {
+        track(-1);
+      }
       if (result.ok) {
         setState('saved');
         if (okMessage) toast.show('success', okMessage);

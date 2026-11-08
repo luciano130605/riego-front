@@ -175,7 +175,7 @@ export function automationState(d: Decision, auto: boolean): { label: string; ac
 
 /** Descripción corta de cómo riega el modo automático con los ajustes actuales. */
 export function modeDescription(settings: Settings): string {
-  if (!settings.auto) return 'Solo riega cuando lo pedís';
+  if (!settings.auto) return 'El riego es manual';
   return settings.mode === 'until-target'
     ? `Riega hasta llegar a ${settings.targetPct} %`
     : `Riega ${formatSeconds(settings.waterSeconds)} cuando la humedad baja`;
@@ -457,5 +457,20 @@ export const CAL = {
   storedDryHint: 'Valor crudo con el sensor al aire o en tierra seca.',
   storedWet: 'Tierra mojada (100 %)',
   storedWetHint: 'Valor crudo con el sensor en agua o en tierra empapada.',
+} as const;
+
+// --- Modo automático / manual (interruptor "Automático") -------------------------------------------
+
+export const AUTO_MODE = {
+  /** Mientras llegan los datos todavía no se sabe en qué modo está. */
+  subtitleLoading: 'Monitoreo y riego',
+  subtitleAuto: 'Monitoreo y riego automático',
+  subtitleManual: 'Monitoreo y riego manual',
+  /** Marcador del umbral en la barra de humedad: con el automático prendido dispara un riego; apagado, solo un aviso. */
+  thresholdAuto: (pct: number): string => `Riega bajo ${pct} %`,
+  thresholdManual: (pct: number): string => `Aviso bajo ${pct} %`,
+  /** Tarjeta "Modo" apagado el automático (sin regador conectado, el riego igual es manual). */
+  manualValue: 'Manual',
+  avisoOffDetail: 'Avisos apagados. El riego es manual.',
 } as const;
 

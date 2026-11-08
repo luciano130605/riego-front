@@ -72,6 +72,6 @@ describe('automationState y modeDescription', () => {
   it('describe el modo según los ajustes', () => {
     expect(modeDescription(settings)).toBe('Riega hasta llegar a 55 %');
     expect(modeDescription({ ...settings, mode: 'fixed' })).toBe('Riega 5 s cuando la humedad baja');
-    expect(modeDescription({ ...settings, auto: false })).toBe('Solo riega cuando lo pedís');
+    expect(modeDescription({ ...settings, auto: false })).toBe('El riego es manual');
   });
 });

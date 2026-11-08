@@ -1,4 +1,5 @@
 import { useContext, useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
+import { automationView, type AutomationView } from '@/core/automation';
 import { deviceView, type DeviceView } from '@/core/deviceView';
 import type { Snapshot } from '@/core/types';
 import type { LabApi, RiegoApi } from './api';
@@ -60,5 +61,11 @@ export function useDeviceView(): DeviceView & { now: number } {
   const snapshot = useSnapshot();
   const now = useNow(AGO_REFRESH_MS);
   return useMemo(() => ({ ...deviceView(snapshot, now), now }), [snapshot, now]);
+}
+
+/** Qué se ve según el interruptor "Automático": la única fuente de verdad (ver `core/automation.ts`). */
+export function useAutomation(): AutomationView {
+  const { load, settings } = useSnapshot();
+  return useMemo(() => automationView({ load, settings }), [load, settings]);
 }
 

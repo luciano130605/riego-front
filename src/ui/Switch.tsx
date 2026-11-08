@@ -20,7 +20,7 @@ export function Switch({ checked, onChange, label, disabled, id }: Props) {
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="inline-flex h-11 w-14 shrink-0 items-center justify-center disabled:cursor-not-allowed disabled:opacity-60"
+      className="inline-flex h-11 w-14 shrink-0 items-center justify-center disabled:cursor-not-allowed disabled:opacity-40"
     >
       <span
         className={cn(
