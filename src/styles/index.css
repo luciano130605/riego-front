@@ -1,0 +1,138 @@
+@import 'tailwindcss';
+
+/* Inter variable, solo el subconjunto latino (alcanza para español). */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')
+    format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * Tema de riego-aut: fondo casi negro, tarjetas apenas más claras, un único
+ * azul para lo interactivo y los gráficos. El verde es solo para "todo bien"
+ * (conectado, humedad adecuada) y el rojo, discreto, para lo que necesita atención.
+ * Ningún estado depende solo del color: siempre hay ícono y texto.
+ */
+@theme {
+  --color-*: initial;
+
+  --color-ground: #101010;
+  --color-card: #191919;
+  --color-raised: #1f1f1f;
+  --color-line: #303030;
+  --color-grid: #262626;
+
+  --color-ink: #f2f2f2;
+  --color-ink-2: #b4b4b4;
+  --color-ink-3: #8c8c8c;
+
+  --color-accent: #398bff;
+  --color-on-accent: #08111f;
+  --color-ok: #3fbf78;
+  --color-alert: #e0524a;
+
+  --font-sans: 'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    sans-serif;
+
+  --radius-card: 20px;
+  --radius-control: 12px;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.25), 0 14px 30px -18px rgb(0 0 0 / 0.55);
+  --shadow-pop: 0 18px 48px -12px rgb(0 0 0 / 0.65);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background: var(--color-ground);
+    color: var(--color-ink);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.45;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Con un diálogo abierto, la página de atrás no se desplaza. */
+  body:has(dialog[open]) {
+    overflow: hidden;
+  }
+
+  button,
+  input,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  }
+}
+
+/* Barra de desplazamiento fina para el contenido de los diálogos y las tablas. */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+/* Diálogo nativo: entra con un fundido corto, sin rebotes. */
+dialog.dialog {
+  animation: dialog-in 200ms ease-out;
+}
+dialog.dialog::backdrop {
+  background: rgb(0 0 0 / 0.62);
+  animation: backdrop-in 200ms ease-out;
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.dialog,
+  dialog.dialog::backdrop {
+    animation: none;
+  }
+}
