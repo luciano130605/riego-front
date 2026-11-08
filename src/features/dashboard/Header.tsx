@@ -27,10 +27,10 @@ export function Header({ onOpenSettings }: Props) {
   return (
     // Mobile: título y los dos botones arriba, el subtítulo abajo y, en una sola fila, el estado y el interruptor.
     // Desde lg: todo en una línea, como siempre.
-    <header className="grid grid-cols-[minmax(0,1fr)_automationauto] items-start gap-x-2 gap-y-3 lg:flex lg:flex-wrap lg:items-center lg:gap-x-3 lg:gap-y-4">
+    <header className="relative grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 gap-y-3 lg:flex lg:flex-wrap lg:items-center lg:gap-x-3 lg:gap-y-4">
       <div className="contents lg:mr-auto lg:block lg:min-w-0 lg:pr-3">
         <div className="col-start-1 row-start-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-          <h1 className="text-[28px] leading-tight font-semibold tracking-tight sm:text-3xl">Mi planta</h1>
+          <h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">Mi planta</h1>
           {snapshot.isDemo &&
             (API_URL ? (
               // Con backend configurado no hay controles de simulación: es solo una etiqueta.
@@ -62,15 +62,15 @@ export function Header({ onOpenSettings }: Props) {
             </span>
           )}
         </div>
-        <p className="col-span-3 row-start-2 text-[15px] text-ink-2 lg:mt-0.5">
+        <p className="col-span-3 row-start-2 -mt-1.5 text-sm text-ink-2 lg:mt-0.5 lg:text-[15px]">
           {aviso ? AVISO.line : automation.subtitle}
         </p>
       </div>
 
-      <div className="col-span-3 row-start-3 grid grid-cols-2 gap-2 lg:contents">
+      <div className="col-span-3 row-start-3 grid grid-cols-[minmax(0,1fr)_auto] gap-2 lg:contents">
         <ConnectionChip className="lg:order-1" />
 
-        <div className="flex h-12 min-w-0 items-center justify-between gap-1 rounded-full border border-line bg-card pr-1 pl-3 lg:order-2 lg:justify-start lg:pl-4">
+        <div className="flex h-12 min-w-0 items-center justify-between gap-2 rounded-full border border-line bg-card pr-1 pl-4 lg:order-2 lg:justify-start lg:pl-4">
           <HugeiconsIcon
             icon={aviso ? Notification01Icon : WaterEnergyIcon}
             size={18}
@@ -106,7 +106,8 @@ export function Header({ onOpenSettings }: Props) {
 
       </div>
 
-      <div className="col-start-2 row-start-1 lg:order-3">
+
+      <div className="col-start-2 row-start-1 lg:order-2">
         <NotificationsButton snapshot={snapshot} derived={derived} />
       </div>
       <IconButton label="Configuración" onClick={() => onOpenSettings()} className="col-start-3 row-start-1 lg:order-4">

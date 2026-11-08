@@ -36,7 +36,8 @@ export function NotificationsButton({ snapshot, derived }: Props) {
     !!snapshot.error || derived.stale || derived.status === 'dry' || derived.status === 'error' || needsWifiGuide(derived.wifi);
 
   return (
-    <div ref={ref} className="relative">
+    // En pantallas chicas el panel se ancla al encabezado (ocupa su ancho); desde lg, a la campana.
+    <div ref={ref} className="lg:relative">
       <IconButton
         label={problem ? 'Avisos: hay algo que revisar' : 'Avisos'}
         aria-expanded={open}
@@ -53,7 +54,7 @@ export function NotificationsButton({ snapshot, derived }: Props) {
         <div
           role="region"
           aria-label="Avisos recientes"
-          className="absolute top-14 right-0 z-30 w-[min(22rem,calc(100vw-2rem))] rounded-card border border-line bg-raised p-2 shadow-pop [animation:pop-in_150ms_ease-out] motion-reduce:animate-none"
+          className="absolute inset-x-0 top-14 z-30 sm:inset-x-auto sm:right-0 sm:w-[22rem] lg:top-14 rounded-card border border-line bg-raised p-2 shadow-pop [animation:pop-in_150ms_ease-out] motion-reduce:animate-none"
         >
           <h2 className="px-3 pt-2 pb-1 text-sm font-semibold">Avisos de los últimos dos días</h2>
           {entries.length === 0 ? (
