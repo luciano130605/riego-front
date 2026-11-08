@@ -126,6 +126,14 @@ export type DeviceStatus = {
 /** `until`: cuándo se corta sola (ms desde epoch). `recent`: últimas lecturas crudas, la más nueva al final. */
 export type DeviceCalibration = { active: boolean; until: number; recent: number[] };
 
+/** Estado del regador (Smart Life u otro): si el servidor lo informa. Aparte de `device.relay`, que dice el modo. */
+export type RelayLink = {
+  driver: 'tuya' | 'ewelink' | 'notify' | 'fake';
+  connected: boolean;
+  /** true si hay un regador al que se le puede mandar una prueba (el botón "Probar dispositivo"). */
+  testAvailable?: boolean;
+};
+
 export type Snapshot = {
   /** 'loading' hasta que llegan los primeros datos. */
   load: 'loading' | 'ready';
@@ -136,6 +144,10 @@ export type Snapshot = {
   events: WaterEvent[];
   settings: Settings;
   device: DeviceStatus;
+  /** El regador y si está conectado. Un backend viejo no lo manda: entonces no se muestra nada. */
+  relayStatus?: RelayLink;
+  /** Igual que `relayStatus` (el backend manda los dos). */
+  relay?: RelayLink;
   /** true mientras los datos son simulados (todavía sin backend). */
   isDemo: boolean;
 };

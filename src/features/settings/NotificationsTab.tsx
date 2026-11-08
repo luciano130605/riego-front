@@ -24,7 +24,6 @@ export function NotificationsTab() {
   const blocked = push.support === 'ok' && push.permission === 'denied';
   const supportMessage =
     push.support === 'insecure' ? NOTIF.insecure : push.support === 'ios-install' ? NOTIF.ios : push.support === 'unsupported' ? NOTIF.unsupported : undefined;
-  const canUse = push.support === 'ok' && !blocked;
 
   const status = supportMessage
     ? { icon: Alert02Icon, tone: 'text-alert', text: supportMessage }
@@ -91,7 +90,6 @@ export function NotificationsTab() {
                 <HugeiconsIcon icon={status.icon} size={16} aria-hidden className="mt-0.5 shrink-0" />
                 <span className="min-w-0">{status.text}</span>
               </span>
-              {canUse && !push.subscribed && <span className="mt-1.5 block">{NOTIF.needsPin}</span>}
             </>
           }
         >

@@ -1,13 +1,16 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { COMMS, offlineSince, SENSOR_STATE, WIFI } from '@/core/copy';
 import { formatAgo, formatDuration, formatSeconds, longDateTime, num, rssiQuality } from '@/core/format';
 import type { Settings } from '@/core/types';
-import { useDeviceView, useDerived, useSnapshot } from '@/data/hooks';
+import { SHOW_TEST } from '@/data/env';
+import { useDeviceView, useDerived, useRiegoApi, useSnapshot } from '@/data/hooks';
 import { cn } from '@/lib/cn';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Alert02Icon,
   CheckmarkCircle02Icon,
+  LoaderIcon,
+  Notification01Icon,
   Wifi02Icon,
   WifiConnected01Icon,
   WifiNoSignalIcon,
@@ -18,6 +21,8 @@ import { WifiGuide } from '@/features/device/WifiGuide';
 import { Skeleton } from '@/ui/Skeleton';
 import { CalibrationSection } from './CalibrationSection';
 import { deviceProblems } from './deviceProblems';
+import { Button } from '@/ui/Button';
+import { DeviceTest } from './deviceTest';
 import { SettingsSection } from './SettingRow';
 
 type Props = { save: (patch: Partial<Settings>, okMessage?: string) => Promise<boolean> };
@@ -132,9 +137,78 @@ export function DeviceTab({ save }: Props) {
         </dl>
       </SettingsSection>
 
+      <RelayLinkRow />
+
       <WifiSection />
 
       <CalibrationSection save={save} />
+    </div>
+  );
+}
+
+/**
+ * Una sola fila: si el regador (Smart Life) está conectado. Sin el dato (backend viejo) no se muestra, y mientras
+ * carga tampoco, para que no aparezca y desaparezca.
+ */
+function RelayLinkRow() {
+  const { relayStatus, relay, load } = useSnapshot();
+  // En modo aviso no hay regador: no hay nada que decir de él.
+  if (load !== 'ready' || !relayStatus || relayStatus.driver === 'notify') return null;
+  const on = relayStatus.connected;
+  const name = relayStatus.driver === 'ewelink' ? 'eWeLink' : 'Smart Life';
+  return (
+    <SettingsSection title="Regador">
+      <p
+        role="status"
+        className={cn('inline-flex items-center gap-2 text-[15px] font-medium', on ? 'text-ok' : 'text-ink-3')}
+      >
+        <HugeiconsIcon icon={on ? CheckmarkCircle02Icon : Alert02Icon} size={16} aria-hidden className="shrink-0" />
+        {on ? `${name} conectado` : `${name} desconectado`}
+      </p>
+      {SHOW_TEST && relay?.testAvailable === true && <TestDeviceButton />}
+    </SettingsSection>
+  );
+}
+
+/**
+ * Botón temporal "Probar dispositivo" (se muestra con VITE_SHOW_TEST=true y si el servidor dice que hay con qué
+ * probar). No da nada por hecho hasta que el servidor responde.
+ */
+function TestDeviceButton() {
+  const api = useRiegoApi();
+  const [test] = useState(() => new DeviceTest(api));
+  useEffect(() => {
+    test.attach();
+    return () => test.dispose();
+  }, [test]);
+  const state = useSyncExternalStore(test.subscribe, test.getState, test.getState);
+  const testing = state.phase === 'testing';
+
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <Button onClick={() => void test.run()} disabled={testing} aria-busy={testing}>
+        <HugeiconsIcon
+          icon={testing ? LoaderIcon : Notification01Icon}
+          size={16}
+          aria-hidden
+          className={cn('shrink-0', testing && 'motion-safe:animate-spin')}
+        />
+        {testing ? 'Probando…' : 'Probar dispositivo'}
+      </Button>
+      <p role="status" aria-live="polite" className="mt-2 min-h-5 text-sm">
+        {state.phase === 'ok' && (
+          <span className="inline-flex items-start gap-2 text-ok">
+            <HugeiconsIcon icon={CheckmarkCircle02Icon} size={16} aria-hidden className="mt-0.5 shrink-0" />
+            {state.message}
+          </span>
+        )}
+        {state.phase === 'error' && (
+          <span className="inline-flex items-start gap-2 text-alert/80">
+            <HugeiconsIcon icon={Alert02Icon} size={16} aria-hidden className="mt-0.5 shrink-0" />
+            {state.error}
+          </span>
+        )}
+      </p>
     </div>
   );
 }

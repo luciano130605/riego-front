@@ -5,6 +5,9 @@ import type { Settings, Snapshot } from '@/core/types';
  * (mockRiego.ts); cuando exista el backend, se escribe otra clase con esta
  * misma forma que hable por HTTP y no cambia ningún componente.
  */
+/** Resultado de la prueba del dispositivo: el texto sale del servidor. */
+export type DeviceTestResult = { ok: true; message: string } | { ok: false; error: string };
+
 export interface RiegoApi {
   subscribe(listener: () => void): () => void;
   getSnapshot(): Snapshot;
@@ -15,9 +18,14 @@ export interface RiegoApi {
   waterNow(): Promise<ActionResult>;
   /**
    * Prende el regador `seconds` segundos solo para probarlo. No crea un evento de riego
-   * ni toca el historial. Necesita sesión (en el backend real pide el PIN).
+   * ni toca el historial.
    */
   testRelay(seconds: number): Promise<ActionResult>;
+  /**
+   * Prueba corta del dispositivo conectado (el botón temporal de Configuración → Dispositivo). Devuelve el mensaje del
+   * servidor; no se da por buena hasta que responde.
+   */
+  testDevice(): Promise<DeviceTestResult>;
   /** Estado del regador (el relé), para saber si se puede probar. */
   relayStatus(): Promise<RelayStatus>;
   /** Empieza la calibración asistida: la placa manda lecturas seguidas (llegan en `snapshot.device.calibration`). */
@@ -123,29 +131,4 @@ export interface LabApi {
   forceMoisture(pct: number): void;
   setFault(fault: Fault): void;
   reset(): void;
-}
-
-/** Estado del pedido de PIN (solo existe cuando hay backend real). */
-export type AuthState = { pinRequested: boolean; error?: string };
-
-/**
- * Extensión opcional de RiegoApi para el backend real: cuando una acción necesita
- * sesión, la API pide el PIN y la pantalla lo muestra en un diálogo.
- */
-export interface AuthApi {
-  subscribeAuth(listener: () => void): () => void;
-  getAuthState(): AuthState;
-  /** Intenta entrar con el PIN. true = quedó la sesión y se reintenta la acción. */
-  submitPin(pin: string): Promise<boolean>;
-  /** El usuario cerró el diálogo sin entrar: la acción pendiente falla. */
-  cancelPin(): void;
-  /**
-   * Pide el PIN ahora, aunque la sesión siga abierta (para acciones que lo exigen siempre, como activar las
-   * notificaciones). true = se puso bien; false = cerraron el diálogo.
-   */
-  confirmPin(): Promise<boolean>;
-}
-
-export function isAuthApi(api: RiegoApi): api is RiegoApi & AuthApi {
-  return typeof (api as Partial<AuthApi>).submitPin === 'function';
 }

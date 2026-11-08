@@ -3,8 +3,7 @@ import type { Settings, Snapshot } from '@/core/types';
 import {
   PUSH_KINDS,
   type ActionResult,
-  type AuthApi,
-  type AuthState,
+  type DeviceTestResult,
   type PushKeyResult,
   type PushKind,
   type PushPrefs,
@@ -14,9 +13,7 @@ import {
   type RelayStatus,
   type RiegoApi,
 } from './api';
-
 const API_ERROR = 'No se pudo conectar con el servidor.';
-const TOKEN_KEY = 'riego-aut:token';
 /** Respuestas de un proxy cuando el servidor de atrás no está: cuentan como "no responde". */
 const GATEWAY_DOWN = new Set([502, 503, 504]);
 
@@ -67,8 +64,6 @@ function isTunnelUrl(base: string): boolean {
   }
 }
 
-type TokenStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-
 export type HttpRiegoOptions = {
   /** Para tests. Por defecto, el fetch del navegador. */
   fetch?: typeof fetch;
@@ -76,17 +71,7 @@ export type HttpRiegoOptions = {
   pollMs?: number;
   /** Cuánto se espera una respuesta antes de darla por perdida. */
   timeoutMs?: number;
-  /** Dónde se guarda el token de sesión. null = solo en memoria. */
-  storage?: TokenStorage | null;
 };
-
-function defaultStorage(): TokenStorage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
 
 function isSnapshot(x: unknown): x is Snapshot {
   if (typeof x !== 'object' || x === null) return false;
@@ -143,17 +128,13 @@ function parsePrefs(x: unknown): PushPrefs | undefined {
  * no note la diferencia: snapshot estable (useSyncExternalStore), `load: 'loading'` al
  * arrancar, `error` con los últimos datos conocidos cuando falla la conexión.
  */
-export class HttpRiego implements RiegoApi, AuthApi {
+export class HttpRiego implements RiegoApi {
   private listeners = new Set<() => void>();
-  private authListeners = new Set<() => void>();
   private snapshot: Snapshot;
-  private auth: AuthState = { pinRequested: false };
-  private pinWaiters: Array<(ok: boolean) => void> = [];
   private timer: ReturnType<typeof setInterval> | undefined;
   private offsetMs = 0; // servidor − reloj local
   private seq = 0; // pedidos enviados
   private applied = 0; // último pedido cuya respuesta ya se usó
-  private token: string | undefined;
   /** Mientras hay una calibración en curso se pide el snapshot cada pocos segundos. */
   private calTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -163,7 +144,6 @@ export class HttpRiego implements RiegoApi, AuthApi {
   private readonly fetchFn: typeof fetch;
   private readonly pollMs: number;
   private readonly timeoutMs: number;
-  private readonly storage: TokenStorage | null;
 
   constructor(baseUrl: string | string[], options: HttpRiegoOptions = {}) {
     this.bases = parseBaseUrls(baseUrl);
@@ -171,12 +151,6 @@ export class HttpRiego implements RiegoApi, AuthApi {
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
     this.pollMs = options.pollMs ?? 30_000;
     this.timeoutMs = options.timeoutMs ?? 10_000;
-    this.storage = options.storage === undefined ? defaultStorage() : options.storage;
-    try {
-      this.token = this.storage?.getItem(TOKEN_KEY) ?? undefined;
-    } catch {
-      this.token = undefined;
-    }
     this.snapshot = {
       load: 'loading',
       now: Date.now(),
@@ -215,8 +189,19 @@ export class HttpRiego implements RiegoApi, AuthApi {
 
   waterNow = (): Promise<ActionResult> => this.act('POST', '/api/water');
 
-  /** Prueba del regador: necesita sesión, así que un 401 abre el diálogo del PIN como en el resto. */
   testRelay = (seconds: number): Promise<ActionResult> => this.act('POST', '/api/relay/test', { seconds });
+
+  /**
+   * Prueba del dispositivo conectado. Va SIN `seconds`: así el backend hace la prueba de conexión sobre el dispositivo
+   * de prueba. Con `seconds` prendería el regador de verdad (eso es `testRelay`).
+   */
+  testDevice = async (): Promise<DeviceTestResult> => {
+    const sent = await this.authed('POST', '/api/relay/test');
+    if ('error' in sent) return { ok: false, error: sent.error };
+    const body = await readBody(sent.res);
+    if (!sent.res.ok) return { ok: false, error: errorOf(sent.res, body) };
+    return { ok: true, message: typeof body.message === 'string' && body.message ? body.message : 'Prueba enviada.' };
+  };
 
   /** Empieza la calibración: la placa manda lecturas seguidas y acá se siguen cada 2 s. */
   startCalibration = (): Promise<ActionResult> => this.act('POST', CAL_START);
@@ -300,54 +285,6 @@ export class HttpRiego implements RiegoApi, AuthApi {
     const prefs = parsePrefs(body.prefs);
     return prefs ? { ok: true, prefs } : { ok: false, error: 'El servidor respondió algo inesperado.' };
   }
-
-  // --- AuthApi -----------------------------------------------------------------
-
-  subscribeAuth = (listener: () => void): (() => void) => {
-    this.authListeners.add(listener);
-    return () => {
-      this.authListeners.delete(listener);
-    };
-  };
-
-  getAuthState = (): AuthState => this.auth;
-
-  submitPin = async (pin: string): Promise<boolean> => {
-    try {
-      const res = await this.request('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
-      });
-      const data: unknown = await res.json().catch(() => ({}));
-      const body = (typeof data === 'object' && data !== null ? data : {}) as { token?: unknown; error?: unknown };
-      if (res.ok && typeof body.token === 'string') {
-        this.saveToken(body.token);
-        this.flushPinWaiters(true);
-        this.setAuth({ pinRequested: false });
-        return true;
-      }
-      const error =
-        res.status === 429 && typeof body.error === 'string' ? body.error : 'PIN incorrecto. Probá de nuevo.';
-      this.setAuth({ pinRequested: true, error });
-      return false;
-    } catch {
-      this.setAuth({ pinRequested: true, error: API_ERROR });
-      return false;
-    }
-  };
-
-  /** Olvida la sesión y abre el diálogo del PIN: así el PIN se pide siempre, no solo cuando venció la sesión. */
-  confirmPin = (): Promise<boolean> => {
-    this.clearToken();
-    return this.askPin();
-  };
-
-  cancelPin = (): void => {
-    if (!this.auth.pinRequested) return;
-    this.flushPinWaiters(false);
-    this.setAuth({ pinRequested: false });
-  };
 
   // --- Internos ----------------------------------------------------------------
 
@@ -443,7 +380,7 @@ export class HttpRiego implements RiegoApi, AuthApi {
     throw failure;
   }
 
-  /** Acción que necesita sesión. Si el servidor dice 401, pide el PIN y reintenta una vez. */
+  /** Acción que cambia algo en el servidor. Lo que responde el servidor (también un error) se muestra tal cual. */
   private async act(method: 'PUT' | 'POST', path: string, body?: unknown): Promise<ActionResult> {
     const sent = await this.authed(method, path, body);
     if ('error' in sent) return { ok: false, error: sent.error };
@@ -452,7 +389,7 @@ export class HttpRiego implements RiegoApi, AuthApi {
     return result;
   }
 
-  /** Pedido con el token de sesión. Ante un 401 pide el PIN y reintenta una vez. No refresca el snapshot. */
+  /** Pedido de una acción. Solo devuelve error si no hubo conexión. No refresca el snapshot. */
   private async authed(
     method: 'GET' | 'PUT' | 'POST' | 'PATCH',
     path: string,
@@ -463,56 +400,13 @@ export class HttpRiego implements RiegoApi, AuthApi {
         method,
         headers: {
           ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
     try {
-      let res = await send();
-      if (res.status === 401) {
-        this.clearToken();
-        if (!(await this.askPin())) return { error: 'Hace falta el PIN para hacer cambios.' };
-        res = await send();
-      }
-      return { res };
+      return { res: await send() };
     } catch {
       return { error: API_ERROR };
-    }
-  }
-
-  private askPin(): Promise<boolean> {
-    return new Promise((resolve) => {
-      this.pinWaiters.push(resolve);
-      this.setAuth({ pinRequested: true });
-    });
-  }
-
-  private flushPinWaiters(ok: boolean): void {
-    const waiters = this.pinWaiters;
-    this.pinWaiters = [];
-    for (const w of waiters) w(ok);
-  }
-
-  private setAuth(next: AuthState): void {
-    this.auth = next;
-    for (const l of this.authListeners) l();
-  }
-
-  private saveToken(token: string): void {
-    this.token = token;
-    try {
-      this.storage?.setItem(TOKEN_KEY, token);
-    } catch {
-      // Sin almacenamiento: la sesión dura lo que dure la pestaña.
-    }
-  }
-
-  private clearToken(): void {
-    this.token = undefined;
-    try {
-      this.storage?.removeItem(TOKEN_KEY);
-    } catch {
-      // ver saveToken
     }
   }
 }

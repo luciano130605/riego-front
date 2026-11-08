@@ -357,8 +357,6 @@ export const NOTIF = {
   denied: 'No permitiste las notificaciones, así que quedan desactivadas.',
   activated: 'Notificaciones activadas.',
   deactivated: 'Notificaciones desactivadas.',
-  needsPin: 'Para activarlas hace falta el PIN. Después el navegador te pregunta si las permitís.',
-  pinCancelled: 'Hace falta el PIN para activar las notificaciones.',
   testSent: 'Listo: te mandamos una notificación de prueba.',
   testExpired: 'La suscripción de este dispositivo venció. Desactivá y volvé a activar las notificaciones.',
   testKindSent: (label: string): string => `Te mandamos la prueba de “${label}”. Mirá este dispositivo.`,

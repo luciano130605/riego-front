@@ -184,12 +184,29 @@ Plantilla en `backend/.env.example` (el `.env` real está en `.gitignore`).
 | `PUBLIC_URL` | sí | URL pública del backend, sin barra final. |
 | `CORS_ORIGIN` | sí | Origen(es) de la pantalla con CORS, separados por coma (ej. `http://localhost:5173,https://tu-pantalla.example.com`). |
 | `PORT` | no | Lo define Railway (por defecto 3000). |
-| `RELAY_DRIVER` | no | `notify` (por defecto: solo avisa cuándo regar, no mueve nada), `fake` (simula el riego) o `ewelink`. |
+| `RELAY_DRIVER` | no | `notify` (por defecto: solo avisa cuándo regar, no mueve nada), `fake` (simula el riego), `ewelink` o `tuya` (enchufe de Smart Life). |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | no (van juntas) | Notificaciones push propias (Web Push). Sin ellas los avisos quedan solo en `incidents`. |
 | `PUSH_API_TOKEN` | no | Habilita `POST /api/push/send`. |
 | `DB_NAME` | no | Nombre de la base (si la URI no lo trae). |
 | `RELAY_HARD_MAX_SECONDS` | no | Tope absoluto de segundos de bomba por orden (por defecto 60). |
 | `EWELINK_APP_ID`, `EWELINK_APP_SECRET`, `EWELINK_DEVICE_ID` | solo con `ewelink` | Credenciales de eWeLink. |
+| `TUYA_ACCESS_ID`, `TUYA_ACCESS_SECRET` | solo con `tuya` | Access ID y Access Secret del proyecto en Tuya Cloud. No se loguean. |
+| `TUYA_BASE_URL` | solo con `tuya` | Endpoint del centro de datos del proyecto, sin barra final: `https://openapi.tuyaus.com` (Oeste de EE. UU.), `https://openapi.tuyaeu.com` (Europa central), etc. |
+| `TUYA_DEVICE_ID` | solo con `tuya` | Id del enchufe (lo muestra `iot.tuya.com` > Cloud > Devices). |
+| `TUYA_TEST_DEVICE_ID` | no | Dispositivo de **prueba** de Smart Life (hoy un timbre) para verificar la conexión sin tocar la bomba. Tiene que ser distinto de `TUYA_DEVICE_ID`. Sin esta variable, la prueba de conexión responde 404. |
+
+#### Conectar el enchufe de Smart Life (`RELAY_DRIVER=tuya`)
+
+1. En [iot.tuya.com](https://iot.tuya.com): *Cloud > Development > Create Cloud Project* (elegí el centro de datos de tu región) y suscribí las APIs **Authorization Token Management**, **Smart Home Basic Service** e **IoT Core**.
+2. En el proyecto: *Devices > Link App Account > Add App Account* y escaneá el QR con la app Smart Life. El enchufe aparece en la lista; copiá su **Device ID**.
+3. Cargá `TUYA_ACCESS_ID`, `TUYA_ACCESS_SECRET`, `TUYA_BASE_URL`, `TUYA_DEVICE_ID` y `RELAY_DRIVER=tuya` en `backend/.env` (en Render, como variables del servicio).
+4. Verificá el enchufe real **antes de regar**: `npm --prefix backend run tuya:spec` muestra si está online, el código de su interruptor (`switch_1` o `switch`) y si tiene cuenta regresiva (`countdown_1`) y en qué unidad. El driver lee esa misma especificación al primer riego y no supone ningún código: si no encuentra un interruptor, no riega.
+
+Seguridad del riego con Tuya: el evento se guarda antes de ordenar el riego y, si la orden de prender falla, se borra y queda un incidente; hay un tope duro de segundos por orden (`RELAY_HARD_MAX_SECONDS`); antes de prender se anota un apagado pendiente en la base; si el apagado falla se reintenta 3 veces con espera y, si sigue fallando, el pendiente se reintenta cada 10 s (y al arrancar). Si el enchufe tiene cuenta regresiva en segundos (o minutos), también se usa como apagado extra. `snapshot.relay` (`{ driver, connected }`, el mismo dato va en `relayStatus`) sale de consultar si el enchufe está online, con un cache de 60 s: nunca se consulta en cada request. Si falla la autenticación o la cuenta de prueba de Tuya venció, `connected` es `false` y queda un incidente `relay-auth` en la campana. *Esta integración se probó con HTTP simulado; todavía no con un enchufe real.*
+
+#### Probar la conexión sin tocar la bomba
+
+Con `TUYA_TEST_DEVICE_ID` definido, `POST /api/relay/test` **sin `seconds`** (requiere sesión) opera solo sobre el dispositivo de prueba: 1) consulta si está online (si no, `ok:false` con el motivo); 2) lee su especificación y deja en el log los códigos y tipos escribibles; 3) si tiene una función que lo haga sonar (`siren_switch`, `buzzer`, `beep`, `ring`, `doorbell_ring`) la usa y la restaura; 4) si no, invierte una luz indicadora o nocturna booleana, espera 2 s y la restaura (si falla, 3 reintentos y un incidente `relay-test`); 5) si no hay ninguna función segura, responde `ok:true`, `action:"status-only"` y la lista `writableCodes`. Nunca toca volumen, melodía ni configuración. Responde `{ ok, message, action: 'ring'|'toggle'|'status-only', latencyMs, writableCodes }` o `{ ok:false, error }`. Límite: 1 prueba cada 10 s (429 con `Retry-After`); se rechaza con 409 si hay un riego en curso y con 400 si el id de prueba es el del riego. Cada prueba queda en la colección `pruebasRelay`. Con `{ seconds }` la misma ruta sigue siendo la prueba de la bomba de siempre. `snapshot.relay.testAvailable` avisa si hay algo para probar, y sin dispositivo de riego configurado `relay.connected` se calcula con el de prueba.
 
 Para generar secretos: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 

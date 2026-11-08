@@ -4,6 +4,7 @@ import type { DeviceCalibration, Reading, SensorStatus, Settings, Snapshot, Wate
 import { DEFAULT_SETTINGS, READ_EVERY_MIN, sanitizeSettings } from '@/core/settings';
 import {
   type ActionResult,
+  type DeviceTestResult,
   type WifiSim,
   type Fault,
   type LabApi,
@@ -202,6 +203,14 @@ export class MockRiego implements RiegoApi, LabApi {
   };
 
   /** Simula la prueba del regador: no crea un evento ni toca la humedad simulada. */
+  /** Prueba del dispositivo simulada: responde bien tras ~800 ms. */
+  testDevice = (): Promise<DeviceTestResult> =>
+    new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(this.fault === 'api-error' ? { ok: false, error: API_ERROR } : { ok: true, message: 'Prueba simulada' });
+      }, 800);
+    });
+
   testRelay = (seconds: number): Promise<ActionResult> => {
     if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
     if (!Number.isInteger(seconds) || seconds < 1) return Promise.resolve({ ok: false, error: 'Los segundos no son válidos.' });
@@ -574,6 +583,8 @@ export class MockRiego implements RiegoApi, LabApi {
         ...(last ? { uptimeSec: Math.max(0, Math.round((last.t - this.bootAt) / 1000)) } : {}),
         ...(this.cal ? { calibration: this.calibrationState() } : {}),
       },
+      relayStatus: { driver: 'fake', connected: true, testAvailable: true },
+      relay: { driver: 'fake', connected: true, testAvailable: true },
       isDemo: true,
     };
     this.snapshot =

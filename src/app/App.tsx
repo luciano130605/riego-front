@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Dashboard } from '@/features/dashboard/Dashboard';
-import { PinDialog } from '@/features/auth/PinDialog';
 import { API_URL } from '@/data/env';
 import { HttpRiego } from '@/data/httpRiego';
 import { RiegoProvider } from '@/data/RiegoProvider';
@@ -43,8 +42,6 @@ export default function App() {
     <RiegoProvider key={example ? 'ejemplo' : 'real'} api={example ? undefined : http} backend={http}>
       <ToastProvider>
         <Dashboard />
-        {/* Con datos de prueba la API activa es el simulador, pero la push se pide al backend: el PIN va por él. */}
-        <PinDialog auth={http} />
       </ToastProvider>
     </RiegoProvider>
   );

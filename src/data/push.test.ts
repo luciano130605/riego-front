@@ -28,16 +28,6 @@ function makeFetch(handler: (c: Call) => Response | Promise<Response>) {
   return { fn: fn as unknown as typeof fetch, calls };
 }
 
-function memoryStorage(initial: Record<string, string> = {}) {
-  const data = new Map(Object.entries(initial));
-  return {
-    getItem: (k: string) => data.get(k) ?? null,
-    setItem: (k: string, v: string) => void data.set(k, v),
-    removeItem: (k: string) => void data.delete(k),
-  };
-}
-
-const logged = () => memoryStorage({ 'riego-aut:token': 'T0KEN' });
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -45,53 +35,33 @@ afterEach(() => vi.useRealTimers());
 describe('HttpRiego: notificaciones push', () => {
   it('pushPublicKey va sin sesión', async () => {
     const { fn, calls } = makeFetch(() => json({ publicKey: 'BKEY' }));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: logged() });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.pushPublicKey()).toEqual({ ok: true, publicKey: 'BKEY' });
     expect(calls[0]).toMatchObject({ method: 'GET', path: '/api/push/public-key', auth: null });
   });
 
   it('pushPublicKey: 503 devuelve el motivo del servidor', async () => {
     const { fn } = makeFetch(() => json({ ok: false, error: 'Sin claves VAPID.' }, 503));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.pushPublicKey()).toEqual({ ok: false, error: 'Sin claves VAPID.' });
   });
 
   it('pushSubscribe manda la suscripción con la sesión y devuelve las preferencias', async () => {
     const { fn, calls } = makeFetch(() => json({ ok: true, prefs: PREFS }));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: logged() });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.pushSubscribe(SUB, 'UA')).toEqual({ ok: true, prefs: PREFS });
     expect(calls[0]).toMatchObject({
       method: 'POST',
       path: '/api/push/subscribe',
-      auth: 'Bearer T0KEN',
       body: { subscription: SUB, userAgent: 'UA' },
     });
-  });
-
-  it('pushSubscribe con 401 pide el PIN y reintenta', async () => {
-    let entered = false;
-    const { fn, calls } = makeFetch((c) => {
-      if (c.path === '/api/login') {
-        entered = true;
-        return json({ token: 'NUEVO' });
-      }
-      return entered ? json({ ok: true, prefs: PREFS }) : json({ ok: false }, 401);
-    });
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage() });
-    const pending = api.pushSubscribe(SUB);
-    await vi.waitFor(() => expect(api.getAuthState().pinRequested).toBe(true));
-    expect(await api.submitPin('1234')).toBe(true);
-    expect(await pending).toEqual({ ok: true, prefs: PREFS });
-    const sent = calls.filter((c) => c.path === '/api/push/subscribe');
-    expect(sent).toHaveLength(2);
-    expect(sent[1].auth).toBe('Bearer NUEVO');
   });
 
   it('pushUnsubscribe y pushPreferences usan las rutas del contrato', async () => {
     const { fn, calls } = makeFetch((c) =>
       c.path === '/api/push/unsubscribe' ? json({ ok: true, removed: true }) : json({ ok: true, prefs: PREFS }),
     );
-    const api = new HttpRiego(BASE, { fetch: fn, storage: logged() });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.pushUnsubscribe(SUB.endpoint)).toEqual({ ok: true });
     expect(await api.pushPreferences(SUB.endpoint, { 'placa-vuelve': false })).toEqual({ ok: true, prefs: PREFS });
     expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/push/unsubscribe', body: { endpoint: SUB.endpoint } });
@@ -104,7 +74,7 @@ describe('HttpRiego: notificaciones push', () => {
 
   it('pushPreferences: 404 (no suscripto) devuelve el error', async () => {
     const { fn } = makeFetch(() => json({ ok: false, error: 'Este dispositivo no está suscripto.' }, 404));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: logged() });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.pushPreferences(SUB.endpoint, {})).toEqual({ ok: false, error: 'Este dispositivo no está suscripto.' });
   });
 
@@ -113,7 +83,7 @@ describe('HttpRiego: notificaciones push', () => {
     const { fn, calls } = makeFetch(() =>
       status === 200 ? json({ ok: true }) : json({ ok: false, error: 'La suscripción venció.' }, status),
     );
-    const api = new HttpRiego(BASE, { fetch: fn, storage: logged() });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.pushTest(SUB.endpoint)).toEqual({ ok: true });
     expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/push/test', body: { endpoint: SUB.endpoint } });
     status = 410;
@@ -124,7 +94,7 @@ describe('HttpRiego: notificaciones push', () => {
     const fn = vi.fn(async () => {
       throw new Error('red');
     }) as unknown as typeof fetch;
-    const api = new HttpRiego(BASE, { fetch: fn, storage: logged() });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.pushTest('x')).toEqual({ ok: false, error: 'No se pudo conectar con el servidor.' });
   });
 });

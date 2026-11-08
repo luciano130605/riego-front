@@ -40,23 +40,13 @@ function makeFetch(handler: (c: Call) => Response | Promise<Response>) {
   return { fn: fn as unknown as typeof fetch, calls };
 }
 
-function memoryStorage(initial: Record<string, string> = {}) {
-  const data = new Map(Object.entries(initial));
-  return {
-    getItem: (k: string) => data.get(k) ?? null,
-    setItem: (k: string, v: string) => void data.set(k, v),
-    removeItem: (k: string) => void data.delete(k),
-    data,
-  };
-}
-
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe('HttpRiego: lectura', () => {
   it('arranca en loading y pasa a ready con los datos del servidor', async () => {
     const { fn } = makeFetch(() => json(serverSnapshot()));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(api.getSnapshot().load).toBe('loading');
     expect(api.getSnapshot().isDemo).toBe(false);
 
@@ -72,7 +62,7 @@ describe('HttpRiego: lectura', () => {
 
   it('devuelve el mismo objeto hasta que hay datos nuevos (useSyncExternalStore)', async () => {
     const { fn } = makeFetch(() => json(serverSnapshot()));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(api.getSnapshot()).toBe(api.getSnapshot());
     api.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
@@ -81,7 +71,7 @@ describe('HttpRiego: lectura', () => {
 
   it('corrige now() con la hora del servidor', async () => {
     const { fn } = makeFetch(() => json(serverSnapshot({ now: Date.now() + 3_600_000 })));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     api.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(Math.abs(api.now() - (Date.now() + 3_600_000))).toBeLessThan(1000);
@@ -89,7 +79,7 @@ describe('HttpRiego: lectura', () => {
 
   it('consulta cada 30 s mientras haya alguien suscripto y deja de hacerlo al irse', async () => {
     const { fn, calls } = makeFetch(() => json(serverSnapshot()));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     const off = api.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toHaveLength(1);
@@ -109,7 +99,7 @@ describe('HttpRiego: lectura', () => {
       if (down) throw new TypeError('Failed to fetch');
       return json(serverSnapshot());
     });
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     api.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
 
@@ -130,7 +120,7 @@ describe('HttpRiego: lectura', () => {
   it('un 503 o una respuesta rara también cuentan como error', async () => {
     const answers = [json({ ok: false }, 503), json({ cualquier: 'cosa' })];
     const { fn } = makeFetch(() => answers.shift()!);
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     api.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(api.getSnapshot().error).toBeDefined();
@@ -141,7 +131,7 @@ describe('HttpRiego: lectura', () => {
   it('ignora una respuesta vieja que llega después de una más nueva', async () => {
     const pending: Array<(r: Response) => void> = [];
     const { fn } = makeFetch(() => new Promise<Response>((resolve) => pending.push(resolve)));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     const first = api.refresh();
     const second = api.refresh();
     pending[1](json(serverSnapshot({ readings: [], events: [{ t: 1, seconds: 5, source: 'auto' }] })));
@@ -159,8 +149,8 @@ describe('HttpRiego: túneles de VS Code', () => {
       seen.push({ url: String(url), skip: new Headers(init?.headers).get('X-Tunnel-Skip-AntiPhishing-Page') });
       return json(serverSnapshot());
     }) as unknown as typeof fetch;
-    await new HttpRiego('https://j3prwv26-3000.brs.devtunnels.ms', { fetch: fn, storage: null }).refresh();
-    await new HttpRiego('http://localhost:3000', { fetch: fn, storage: null }).refresh();
+    await new HttpRiego('https://j3prwv26-3000.brs.devtunnels.ms', { fetch: fn }).refresh();
+    await new HttpRiego('http://localhost:3000', { fetch: fn }).refresh();
     expect(seen).toEqual([
       { url: 'https://j3prwv26-3000.brs.devtunnels.ms/api/snapshot', skip: 'true' },
       { url: 'http://localhost:3000/api/snapshot', skip: null },
@@ -171,18 +161,17 @@ describe('HttpRiego: túneles de VS Code', () => {
 describe('HttpRiego: acciones', () => {
   it('updateSettings manda un PUT con el token y vuelve a leer el snapshot', async () => {
     const { fn, calls } = makeFetch((c) => (c.path === '/api/snapshot' ? json(serverSnapshot()) : json({ ok: true })));
-    const storage = memoryStorage({ 'riego-aut:token': 'tok123' });
-    const api = new HttpRiego(BASE, { fetch: fn, storage });
+    const api = new HttpRiego(BASE, { fetch: fn });
     const result = await api.updateSettings({ waterSeconds: 8 });
     expect(result).toEqual({ ok: true });
-    expect(calls[0]).toMatchObject({ method: 'PUT', path: '/api/settings', auth: 'Bearer tok123', body: { waterSeconds: 8 } });
+    expect(calls[0]).toMatchObject({ method: 'PUT', path: '/api/settings', body: { waterSeconds: 8 } });
     expect(calls[1]).toMatchObject({ method: 'GET', path: '/api/snapshot' });
     expect(api.getSnapshot().load).toBe('ready');
   });
 
   it('waterNow manda un POST a /api/water', async () => {
     const { fn, calls } = makeFetch((c) => (c.path === '/api/snapshot' ? json(serverSnapshot()) : json({ ok: true })));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage({ 'riego-aut:token': 't' }) });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.waterNow()).toEqual({ ok: true });
     expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/water' });
   });
@@ -191,7 +180,7 @@ describe('HttpRiego: acciones', () => {
     const { fn } = makeFetch((c) =>
       c.path === '/api/snapshot' ? json(serverSnapshot()) : json({ ok: false, error: 'La bomba ya está regando.' }, 409),
     );
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage({ 'riego-aut:token': 't' }) });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.waterNow()).toEqual({ ok: false, error: 'La bomba ya está regando.' });
   });
 
@@ -199,83 +188,69 @@ describe('HttpRiego: acciones', () => {
     const { fn } = makeFetch(() => {
       throw new TypeError('Failed to fetch');
     });
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.waterNow()).toEqual({ ok: false, error: 'No se pudo conectar con el servidor.' });
     expect(await api.updateSettings({ auto: false })).toEqual({ ok: false, error: 'No se pudo conectar con el servidor.' });
   });
 });
 
-describe('HttpRiego: PIN', () => {
-  function authServer(validPin = '1234') {
-    return makeFetch((c) => {
-      if (c.path === '/api/snapshot') return json(serverSnapshot());
-      if (c.path === '/api/login') {
-        const pin = (c.body as { pin: string }).pin;
-        return pin === validPin ? json({ token: 'nuevo-token' }) : json({ ok: false, error: 'PIN incorrecto.' }, 401);
-      }
-      return c.auth === 'Bearer nuevo-token' ? json({ ok: true }) : json({ ok: false, error: 'No autorizado.' }, 401);
+describe('HttpRiego: respuestas del servidor', () => {
+  it('un 400 del servidor se muestra tal cual y no se da nada por guardado', async () => {
+    const { fn } = makeFetch((c) =>
+      c.path === '/api/settings'
+        ? json({ ok: false, error: 'El objetivo tiene que ser mayor que el umbral.' }, 400)
+        : json(serverSnapshot()),
+    );
+    const api = new HttpRiego(BASE, { fetch: fn });
+    await api.refresh();
+    const before = api.getSnapshot().settings;
+    expect(await api.updateSettings({ thresholdPct: 60, targetPct: 50 })).toEqual({
+      ok: false,
+      error: 'El objetivo tiene que ser mayor que el umbral.',
     });
-  }
-
-  it('ante un 401 pide el PIN, guarda el token y reintenta la acción', async () => {
-    const { fn, calls } = authServer();
-    const storage = memoryStorage();
-    const api = new HttpRiego(BASE, { fetch: fn, storage });
-    const auth = vi.fn();
-    api.subscribeAuth(auth);
-
-    const pending = api.waterNow();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(api.getAuthState().pinRequested).toBe(true);
-    expect(auth).toHaveBeenCalled();
-
-    expect(await api.submitPin('1234')).toBe(true);
-    expect(await pending).toEqual({ ok: true });
-    expect(api.getAuthState().pinRequested).toBe(false);
-    expect(storage.data.get('riego-aut:token')).toBe('nuevo-token');
-    const water = calls.filter((c) => c.path === '/api/water');
-    expect(water).toHaveLength(2);
-    expect(water[1].auth).toBe('Bearer nuevo-token');
+    expect(api.getSnapshot().settings).toEqual(before);
   });
 
-  it('con un PIN incorrecto el diálogo sigue abierto y muestra el motivo', async () => {
-    const { fn } = authServer();
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage() });
-    void api.waterNow();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await api.submitPin('0000')).toBe(false);
-    expect(api.getAuthState()).toMatchObject({ pinRequested: true, error: expect.stringContaining('PIN') });
+  it('el estado del regador se lee del snapshot si el servidor lo manda', async () => {
+    const { fn } = makeFetch(() => json({ ...serverSnapshot(), relayStatus: { driver: 'tuya', connected: false } }));
+    const api = new HttpRiego(BASE, { fetch: fn });
+    await api.refresh();
+    expect(api.getSnapshot().relayStatus).toEqual({ driver: 'tuya', connected: false });
   });
 
-  it('si se cancela, la acción falla sin dar nada por hecho', async () => {
-    const { fn } = authServer();
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage() });
-    const pending = api.updateSettings({ auto: false });
-    await vi.advanceTimersByTimeAsync(0);
-    api.cancelPin();
-    expect(await pending).toEqual({ ok: false, error: 'Hace falta el PIN para hacer cambios.' });
-    expect(api.getAuthState().pinRequested).toBe(false);
+  it('un backend viejo no manda relayStatus: queda sin definir', async () => {
+    const { fn } = makeFetch(() => json(serverSnapshot()));
+    const api = new HttpRiego(BASE, { fetch: fn });
+    await api.refresh();
+    expect(api.getSnapshot().relayStatus).toBeUndefined();
+  });
+});
+
+describe('HttpRiego: probar dispositivo', () => {
+  it('va sin `seconds` (no prende el regador) y muestra el mensaje del servidor', async () => {
+    const { fn, calls } = makeFetch((c) =>
+      c.path === '/api/relay/test' ? json({ ok: true, message: 'Smart Life respondió.' }) : json(serverSnapshot()),
+    );
+    const api = new HttpRiego(BASE, { fetch: fn });
+    expect(await api.testDevice()).toEqual({ ok: true, message: 'Smart Life respondió.' });
+    const sent = calls.find((c) => c.path === '/api/relay/test')!;
+    expect(sent.method).toBe('POST');
+    expect(sent.body).toBeUndefined();
   });
 
-  it('un token vencido se descarta y se vuelve a pedir el PIN', async () => {
-    const { fn } = authServer();
-    const storage = memoryStorage({ 'riego-aut:token': 'vencido' });
-    const api = new HttpRiego(BASE, { fetch: fn, storage });
-    void api.waterNow();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(api.getAuthState().pinRequested).toBe(true);
-    expect(storage.data.has('riego-aut:token')).toBe(false);
-  });
-
-  it('dos acciones pendientes se resuelven con un solo PIN', async () => {
-    const { fn } = authServer();
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage() });
-    const a = api.waterNow();
-    const b = api.updateSettings({ auto: true });
-    await vi.advanceTimersByTimeAsync(0);
-    await api.submitPin('1234');
-    expect(await a).toEqual({ ok: true });
-    expect(await b).toEqual({ ok: true });
+  it('sin mensaje del servidor usa uno genérico; con error, el del servidor', async () => {
+    let ok = true;
+    const { fn } = makeFetch((c) =>
+      c.path === '/api/relay/test'
+        ? ok
+          ? json({ ok: true })
+          : json({ ok: false, error: 'Esperá 10 s antes de probar de nuevo.' }, 429)
+        : json(serverSnapshot()),
+    );
+    const api = new HttpRiego(BASE, { fetch: fn });
+    expect(await api.testDevice()).toEqual({ ok: true, message: 'Prueba enviada.' });
+    ok = false;
+    expect(await api.testDevice()).toEqual({ ok: false, error: 'Esperá 10 s antes de probar de nuevo.' });
   });
 });
 
@@ -284,26 +259,25 @@ describe('HttpRiego: regador', () => {
     const { fn, calls } = makeFetch((c) =>
       c.path === '/api/relay/status' ? json({ ok: true, online: true, on: false, simulated: true, maxSeconds: 30 }) : json(serverSnapshot()),
     );
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.relayStatus()).toEqual({ ok: true, online: true, on: false, simulated: true, maxSeconds: 30 });
     const call = calls.find((c) => c.path === '/api/relay/status')!;
     expect(call.method).toBe('GET');
-    expect(call.auth).toBeNull(); // es público: no pide PIN
+    expect(call.auth).toBeNull(); // es de lectura libre: no manda credenciales
   });
 
   it('relayStatus informa el error si el servidor falla, no responde o contesta algo raro', async () => {
-    const down = new HttpRiego(BASE, { fetch: makeFetch(() => json({ ok: false, error: 'Base caída' }, 503)).fn, storage: null });
+    const down = new HttpRiego(BASE, { fetch: makeFetch(() => json({ ok: false, error: 'Base caída' }, 503)).fn });
     expect(await down.relayStatus()).toEqual({ ok: false, error: 'Base caída' });
 
-    const gone = new HttpRiego(BASE, { fetch: (() => Promise.reject(new Error('red'))) as unknown as typeof fetch, storage: null });
+    const gone = new HttpRiego(BASE, { fetch: (() => Promise.reject(new Error('red'))) as unknown as typeof fetch });
     expect(await gone.relayStatus()).toEqual({ ok: false, error: 'No se pudo conectar con el servidor.' });
 
-    const odd = new HttpRiego(BASE, { fetch: makeFetch(() => json({ hola: 1 })).fn, storage: null });
+    const odd = new HttpRiego(BASE, { fetch: makeFetch(() => json({ hola: 1 })).fn });
     expect(await odd.relayStatus()).toMatchObject({ ok: false });
   });
 
   it('testRelay manda los segundos con la sesión y devuelve el motivo si el servidor lo rechaza', async () => {
-    const storage = memoryStorage({ 'riego-aut:token': 'T0KEN' });
     const { fn, calls } = makeFetch((c) =>
       c.path === '/api/relay/test'
         ? (c.body as { seconds: number }).seconds > 10
@@ -311,40 +285,19 @@ describe('HttpRiego: regador', () => {
           : json({ ok: true })
         : json(serverSnapshot()),
     );
-    const api = new HttpRiego(BASE, { fetch: fn, storage });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.testRelay(5)).toEqual({ ok: true });
     const sent = calls.find((c) => c.path === '/api/relay/test')!;
-    expect(sent).toMatchObject({ method: 'POST', auth: 'Bearer T0KEN', body: { seconds: 5 } });
+    expect(sent).toMatchObject({ method: 'POST', body: { seconds: 5 } });
     expect(await api.testRelay(20)).toEqual({ ok: false, error: 'El máximo para una prueba es 10 s.' });
   });
 
-  it('testRelay con 401 pide el PIN y, si se entra, reintenta', async () => {
-    let logged = false;
-    const { fn, calls } = makeFetch((c) => {
-      if (c.path === '/api/login') {
-        logged = true;
-        return json({ token: 'NUEVO' });
-      }
-      if (c.path === '/api/relay/test') return logged ? json({ ok: true }) : json({ ok: false, error: 'No autorizado.' }, 401);
-      return json(serverSnapshot());
-    });
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage() });
-    const pending = api.testRelay(2);
-    await vi.waitFor(() => expect(api.getAuthState().pinRequested).toBe(true));
-    expect(await api.submitPin('1234')).toBe(true);
-    expect(await pending).toEqual({ ok: true });
-    const tests = calls.filter((c) => c.path === '/api/relay/test');
-    expect(tests).toHaveLength(2);
-    expect(tests[1].auth).toBe('Bearer NUEVO');
-  });
-
-  it('testRelay: si cancelan el PIN, falla con un mensaje claro', async () => {
-    const { fn } = makeFetch((c) => (c.path === '/api/relay/test' ? json({ ok: false }, 401) : json(serverSnapshot())));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage() });
-    const pending = api.testRelay(2);
-    await vi.waitFor(() => expect(api.getAuthState().pinRequested).toBe(true));
-    api.cancelPin();
-    expect(await pending).toEqual({ ok: false, error: 'Hace falta el PIN para hacer cambios.' });
+  it('testRelay: el error del servidor se muestra y no se da por hecho', async () => {
+    const { fn } = makeFetch((c) =>
+      c.path === '/api/relay/test' ? json({ ok: false, error: 'El regador no responde.' }, 503) : json(serverSnapshot()),
+    );
+    const api = new HttpRiego(BASE, { fetch: fn });
+    expect(await api.testRelay(2)).toEqual({ ok: false, error: 'El regador no responde.' });
   });
 });
 
@@ -391,12 +344,12 @@ describe('HttpRiego: dos servidores (local y Railway)', () => {
     expect(parseBaseUrls('http://localhost:3000', 'localhost')).toEqual(['http://localhost:3000']);
     expect(parseBaseUrls('http://localhost:3000', '127.0.0.1')).toEqual(['http://localhost:3000']);
     expect(parseBaseUrls('http://localhost:3000', undefined)).toEqual(['http://localhost:3000']);
-    expect(() => new HttpRiego('  ', { storage: null })).toThrow();
+    expect(() => new HttpRiego('  ')).toThrow();
   });
 
   it('usa el primero si responde y no toca el otro', async () => {
     const { fn, hits } = twoServers({ local: true, remote: true });
-    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn, storage: null });
+    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn });
     await api.refresh();
     expect(api.getSnapshot().error).toBeUndefined();
     expect(hits).toEqual(['local']);
@@ -404,7 +357,7 @@ describe('HttpRiego: dos servidores (local y Railway)', () => {
 
   it('si el primero (local) no responde, pasa al segundo (Railway) y se queda ahí', async () => {
     const { fn, hits } = twoServers({ local: false, remote: true });
-    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn, storage: null });
+    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn });
     await api.refresh();
     expect(api.getSnapshot().error).toBeUndefined();
     expect(hits).toEqual(['local', 'remote']);
@@ -416,7 +369,7 @@ describe('HttpRiego: dos servidores (local y Railway)', () => {
   it('y al revés: si Railway se cae, vuelve al local', async () => {
     const up = { local: false, remote: true };
     const { fn, hits } = twoServers(up);
-    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn, storage: null });
+    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn });
     await api.refresh(); // queda en Railway
     up.remote = false;
     up.local = true;
@@ -434,7 +387,7 @@ describe('HttpRiego: dos servidores (local y Railway)', () => {
       if (u.startsWith(LOCAL)) return json({ error: 'Bad gateway' }, 502);
       return json(u.endsWith('/api/snapshot') ? serverSnapshot() : { ok: true });
     }) as unknown as typeof fetch;
-    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn, storage: memoryStorage({ 'riego-aut:token': 'T' }) });
+    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn });
     expect(await api.waterNow()).toEqual({ ok: true });
     expect(calls[0]).toBe(`${LOCAL}/api/water`);
     expect(calls[1]).toBe(`${REMOTE}/api/water`);
@@ -442,7 +395,7 @@ describe('HttpRiego: dos servidores (local y Railway)', () => {
 
   it('si ninguno responde, muestra el error de conexión con los últimos datos', async () => {
     const { fn } = twoServers({ local: false, remote: false });
-    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn, storage: null });
+    const api = new HttpRiego(`${LOCAL},${REMOTE}`, { fetch: fn });
     await api.refresh();
     expect(api.getSnapshot().error).toBe('No se pudo conectar con el servidor.');
   });
@@ -460,21 +413,20 @@ describe('HttpRiego: calibración', () => {
     });
 
   it('startCalibration y stopCalibration llaman a su ruta con la sesión', async () => {
-    const storage = memoryStorage({ 'riego-aut:token': 'T0KEN' });
     const { fn, calls } = makeFetch((c) => (c.path.startsWith('/api/calibration') ? json({ ok: true }) : json(serverSnapshot())));
-    const api = new HttpRiego(BASE, { fetch: fn, storage });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.startCalibration()).toEqual({ ok: true });
     expect(await api.stopCalibration()).toEqual({ ok: true });
     const sent = calls.filter((c) => c.path.startsWith('/api/calibration'));
     expect(sent.map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/calibration/start', 'POST /api/calibration/stop']);
-    expect(sent.every((c) => c.auth === 'Bearer T0KEN')).toBe(true);
+    expect(sent.every((c) => c.auth === null)).toBe(true); // sin sesión: no viaja ningún token
   });
 
-  it('con 401 pide el PIN, y si el servidor la rechaza devuelve el motivo', async () => {
+  it('si el servidor rechaza la orden, devuelve el motivo', async () => {
     const { fn } = makeFetch((c) =>
       c.path === '/api/calibration/start' ? json({ ok: false, error: 'Ya hay una calibración en curso.' }, 409) : json(serverSnapshot()),
     );
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage({ 'riego-aut:token': 'T' }) });
+    const api = new HttpRiego(BASE, { fetch: fn });
     expect(await api.startCalibration()).toEqual({ ok: false, error: 'Ya hay una calibración en curso.' });
   });
 
@@ -485,7 +437,7 @@ describe('HttpRiego: calibración', () => {
       n++;
       return json(active ? calibrating([3000 + n]) : serverSnapshot());
     });
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     const unsub = api.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(api.getSnapshot().device.calibration?.recent).toEqual([3001]);
@@ -504,7 +456,7 @@ describe('HttpRiego: calibración', () => {
 
   it('al dejar de mirar (nadie suscripto) corta el sondeo rápido', async () => {
     const { fn, calls } = makeFetch(() => json(calibrating([3000])));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    const api = new HttpRiego(BASE, { fetch: fn });
     const unsub = api.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     unsub();
@@ -513,41 +465,3 @@ describe('HttpRiego: calibración', () => {
     expect(calls.length).toBe(n);
   });
 });
-
-describe('HttpRiego: confirmPin (pedir el PIN aunque la sesión siga abierta)', () => {
-  it('olvida el token y abre el diálogo; con el PIN correcto devuelve true y guarda la sesión nueva', async () => {
-    const storage = memoryStorage({ 'riego-aut:token': 'viejo' });
-    const { fn } = makeFetch((c) => (c.path === '/api/login' ? json({ token: 'nuevo' }) : json(serverSnapshot())));
-    const api = new HttpRiego(BASE, { fetch: fn, storage });
-    const pending = api.confirmPin();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(api.getAuthState().pinRequested).toBe(true);
-    expect(storage.data.has('riego-aut:token')).toBe(false); // la sesión vieja ya no sirve
-    expect(await api.submitPin('1234')).toBe(true);
-    expect(await pending).toBe(true);
-    expect(storage.data.get('riego-aut:token')).toBe('nuevo');
-    expect(api.getAuthState().pinRequested).toBe(false);
-  });
-
-  it('si cierran el diálogo sin poner el PIN devuelve false', async () => {
-    const { fn } = makeFetch(() => json(serverSnapshot()));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage({ 'riego-aut:token': 'viejo' }) });
-    const pending = api.confirmPin();
-    await vi.advanceTimersByTimeAsync(0);
-    api.cancelPin();
-    expect(await pending).toBe(false);
-  });
-
-  it('con un PIN incorrecto el diálogo sigue abierto y no se activa nada', async () => {
-    const { fn } = makeFetch((c) => (c.path === '/api/login' ? json({ ok: false, error: 'PIN incorrecto.' }, 401) : json(serverSnapshot())));
-    const api = new HttpRiego(BASE, { fetch: fn, storage: memoryStorage() });
-    let settled = false;
-    void api.confirmPin().then(() => (settled = true));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await api.submitPin('0000')).toBe(false);
-    await vi.advanceTimersByTimeAsync(10);
-    expect(settled).toBe(false);
-    expect(api.getAuthState()).toMatchObject({ pinRequested: true });
-  });
-});
-
