@@ -233,8 +233,9 @@ cd backend
 npm run migrate-plants              # solo cuenta qué haría (no escribe nada)
 npm run migrate-plants -- --confirm # la aplica
 ```
-Con la base sin migrar, el servidor **no arranca** y lo dice (así no se despliega código nuevo sobre datos viejos sin respaldo).
-Una base completamente vacía se migra sola. Después de migrar: `POST /api/readings` del firmware 0.2.0 sigue andando sin
+**Al arrancar el servidor migra la base solo** (la migración únicamente agrega y se puede repetir; lo deja dicho en el log), así que
+el primer deploy con el código nuevo la migra sin que hagas nada: **hacé el respaldo antes de desplegar**. Si preferís migrarla vos
+primero, poné `AUTO_MIGRATE=false`: entonces el servidor no arranca con la base sin migrar y te dice qué comando correr. Después de migrar: `POST /api/readings` del firmware 0.2.0 sigue andando sin
 cambios (va al canal `main`), y los endpoints viejos operan sobre la primera planta. Contrato: `backend/docs/API-PLANTAS.md`.
 
 ### API
