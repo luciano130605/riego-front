@@ -7,6 +7,10 @@ import { GardenView } from '@/features/garden/GardenView';
 import { PlantDetail } from '@/features/garden/PlantDetail';
 import { useRoute } from '@/features/garden/useRoute';
 import { useSnapshot } from '@/data/hooks';
+import { ewelinkReturnText, parseEwelinkReturn, withoutEwelinkParams } from '@/core/ewelink';
+import { setEwelinkReturn } from '@/features/settings/ewelinkReturn';
+import { requestSettings } from '@/features/settings/settingsRequest';
+import { useToast } from '@/ui/toastContext';
 import { API_URL } from '@/data/env';
 import { HttpRiego } from '@/data/httpRiego';
 import { RiegoProvider } from '@/data/RiegoProvider';
@@ -49,6 +53,19 @@ function useBackendExample(api: HttpRiego | undefined): boolean {
 function Shell() {
   const snapshot = useSnapshot();
   const route = useRoute();
+  const toast = useToast();
+
+  // Al volver de eWeLink la dirección trae ?ewelink=ok o ?ewelink=error&motivo=...: se muestra qué pasó, se abre
+  // Configuración en la sección de eWeLink (que vuelve a pedir el estado) y se limpia la dirección.
+  useEffect(() => {
+    const r = parseEwelinkReturn(window.location.search);
+    if (!r) return;
+    setEwelinkReturn(r);
+    toast.show(r.kind === 'ok' ? 'success' : 'error', ewelinkReturnText(r));
+    requestSettings({ tab: 'device', anchor: 'ewelink' });
+    window.history.replaceState(null, '', withoutEwelinkParams(window.location.href));
+  }, [toast]);
+
   if (snapshot.plants === undefined) return snapshot.load === 'loading' ? <GardenSkeleton /> : <Dashboard />;
   return route.name === 'plant' ? <PlantDetail id={route.id} /> : <GardenView />;
 }

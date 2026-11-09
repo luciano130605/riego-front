@@ -3,9 +3,13 @@ import { clamp, percentToRaw, rawToPercent } from '@/core/moisture';
 import type { PlantSensor, DeviceCalibration, Incident, NightSummary, Reading, SensorStatus, Settings, Snapshot, WaterEvent } from '@/core/types';
 import { quietHoursOf, validateQuietHours } from '@/core/quietHours';
 import { MAIN_PLANT_ID, MockGarden, type Base } from './mockGarden';
+import { loadEwelinkSim, saveEwelinkSim, ewelinkStatusFor } from './mockEwelink';
 import { DEFAULT_SETTINGS, READ_EVERY_MIN, sanitizeSettings } from '@/core/settings';
 import {
   type ActionResult,
+  type EwelinkLoginResult,
+  type EwelinkSim,
+  type EwelinkStatusResult,
   type DeviceTestResult,
   type WifiSim,
   type Fault,
@@ -152,6 +156,8 @@ export class MockRiego implements RiegoApi, LabApi {
   private frozen: Snapshot | undefined;
   fault: Fault = 'none';
   wifi: WifiSim = 'connected';
+  /** Cómo está el vínculo con eWeLink (de eso depende si el regador responde). */
+  ewelink: EwelinkSim = loadEwelinkSim();
   /** Red a la que está conectada la placa simulada, y cuándo se conectó con ella / cuándo olvidó la anterior. */
   private ssid = 'MiCasa-2.4G';
   private lastWifiChange: number | undefined;
@@ -356,7 +362,8 @@ export class MockRiego implements RiegoApi, LabApi {
     if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
     return Promise.resolve({
       ok: true,
-      online: true,
+      // Sin el vínculo con eWeLink (o con el equipo sin conexión) el regador no responde.
+      online: this.ewelink === 'vinculada',
       on: Date.now() < this.relayOnUntil,
       simulated: false,
       maxSeconds: RELAY_MAX_SECONDS,
@@ -484,6 +491,32 @@ export class MockRiego implements RiegoApi, LabApi {
    * Wifi de la placa simulada. Sin conexión y reseteada la placa no reporta: para que se vea enseguida, el reloj
    * avanza una hora (si no, habría que esperar el margen de silencio). Reseteada además queda `wifiResetAt`.
    */
+  setEwelink = (state: EwelinkSim): void => {
+    if (state === this.ewelink) return;
+    this.ewelink = state;
+    saveEwelinkSim(state);
+    this.publish();
+  };
+
+  ewelinkStatus = (): Promise<EwelinkStatusResult> => {
+    if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
+    return Promise.resolve({ ok: true, status: ewelinkStatusFor(this.ewelink, this.now()) });
+  };
+
+  /** Simula la ida a eWeLink: devuelve la misma página con `?ewelink=ok` y deja el vínculo hecho (como el callback real). */
+  ewelinkLogin = (): Promise<EwelinkLoginResult> => {
+    if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
+    this.setEwelink('vinculada');
+    const base = typeof location !== 'undefined' ? `${location.origin}${location.pathname}` : 'http://localhost/';
+    return Promise.resolve({ ok: true, url: `${base}?ewelink=ok` });
+  };
+
+  ewelinkUnlink = (): Promise<ActionResult> => {
+    if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
+    this.setEwelink('sin-vincular');
+    return Promise.resolve({ ok: true });
+  };
+
   setWifi = (wifi: WifiSim): void => {
     if (wifi === this.wifi) return;
     const t = this.now();
@@ -547,6 +580,8 @@ export class MockRiego implements RiegoApi, LabApi {
 
     this.settings = loadSettings();
     this.garden.reset(this.settings);
+    this.ewelink = 'vinculada';
+    saveEwelinkSim('vinculada');
     this.scope = undefined;
     this.lastRebuild = 0;
     this.frozen = undefined;

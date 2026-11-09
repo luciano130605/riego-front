@@ -9,6 +9,7 @@ import { WifiBanner } from '@/features/device/WifiGuide';
 import { NeedsWaterBanner } from '@/features/irrigation/NeedsWaterBanner';
 import { MoistureCard } from '@/features/moisture/MoistureCard';
 import { SettingsDialog, type TabId } from '@/features/settings/SettingsDialog';
+import { useSettingsRequest } from '@/features/settings/settingsRequest';
 import { LastWatering, OperationMode, WeeklyWatering } from '@/features/summary/SummaryCards';
 import { Header, type HeaderTitle } from './Header';
 import { HugeiconsIcon } from '@hugeicons/react';
@@ -31,6 +32,7 @@ export function Dashboard({ header, bar, noSensor }: Props = {}) {
   const showRiego = auto.loading || auto.show.waterNow;
   const [settings, setSettings] = useState<{ open: boolean; tab: TabId }>({ open: false, tab: 'automation' });
   const openSettings = (tab: TabId = 'automation') => setSettings({ open: true, tab });
+  useSettingsRequest(openSettings);
 
   const chart = {
     readings: snapshot.readings,

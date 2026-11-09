@@ -1,4 +1,4 @@
-import type { PlantSensor, Settings, Snapshot } from '@/core/types';
+import type { EwelinkStatus, PlantSensor, Settings, Snapshot } from '@/core/types';
 
 /**
  * Lo único que la pantalla sabe del mundo. Hoy lo implementa el simulador
@@ -21,6 +21,11 @@ export type DeviceTestDetails = {
   before?: boolean;
   seconds?: number;
 };
+
+/** Estado del vínculo con eWeLink. `unavailable`: el servidor no tiene esa ruta (backend viejo): la sección no se muestra. */
+export type EwelinkStatusResult = { ok: true; status: EwelinkStatus } | { ok: false; error: string; unavailable?: boolean };
+/** La dirección de eWeLink a la que hay que mandar al navegador para autorizar. */
+export type EwelinkLoginResult = { ok: true; url: string } | { ok: false; error: string };
 
 /** Resultado de tomar un punto de la calibración en el servidor. `saved`: con los dos puntos, el servidor ya la guardó. */
 export type CaptureResult = { ok: true; saved: boolean } | { ok: false; error: string };
@@ -57,6 +62,14 @@ export interface RiegoApi {
    * servidor; no se da por buena hasta que responde.
    */
   testDevice(): Promise<DeviceTestResult>;
+
+  // --- eWeLink (el Sonoff) --------------------------------------------------------------------------------------
+  /** Estado del vínculo: sin vincular, vinculada (con vencimiento), vencida o con error, y si el equipo está en línea. */
+  ewelinkStatus(): Promise<EwelinkStatusResult>;
+  /** Pide la dirección de eWeLink para vincular (necesita sesión). La pantalla redirige ahí; al volver trae `?ewelink=`. */
+  ewelinkLogin(): Promise<EwelinkLoginResult>;
+  /** Borra el vínculo guardado (necesita sesión). */
+  ewelinkUnlink(): Promise<ActionResult>;
 
   // --- Sectores y plantas ---------------------------------------------------------------------------------------
   /**
@@ -174,8 +187,14 @@ export type WifiSim =
   | 'offline' // dejó de reportar (por ejemplo, cambió el router)
   | 'reset'; // olvidó su red (IO0) y espera que le carguen una nueva
 
+/** Cómo está el vínculo con eWeLink en el simulador. */
+export type EwelinkSim = 'vinculada' | 'equipo-sin-conexion' | 'sin-vincular' | 'vencida' | 'error';
+
 export interface LabApi {
   readonly fault: Fault;
+  readonly ewelink: EwelinkSim;
+  /** Cambia el estado del vínculo con eWeLink (y con él, si el regador responde). */
+  setEwelink(state: EwelinkSim): void;
   readonly wifi: WifiSim;
   /** Cambia el estado del wifi de la placa. Sin conexión o reseteada, la placa deja de reportar. */
   setWifi(wifi: WifiSim): void;

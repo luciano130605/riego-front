@@ -187,6 +187,28 @@ export type RelayLink = {
   testDeviceName?: string;
 };
 
+/**
+ * Estado del vínculo con eWeLink (el Sonoff), tal cual lo informa `GET /api/ewelink/status`.
+ * - 'sin-vincular': todavía no se autorizó (o se desvinculó).
+ * - 'vinculada': hay acceso; `venceEl` es cuándo vence el acceso actual (se renueva solo mientras no venza el de renovación).
+ * - 'vencida': venció la renovación: hay que vincular de nuevo.
+ * - 'error': falló la renovación o la consulta (`error` dice por qué).
+ */
+export type EwelinkEstado = 'sin-vincular' | 'vinculada' | 'vencida' | 'error';
+
+export type EwelinkStatus = {
+  /** false = el servidor no tiene eWeLink configurado (faltan credenciales o el regador no es eWeLink). */
+  configurado: boolean;
+  estado: EwelinkEstado;
+  region: string | null;
+  /** Cuándo vence el acceso actual (ms desde epoch). */
+  venceEl: number | null;
+  /** Solo con estado 'error': qué pasó, en español. */
+  error?: string;
+  /** El equipo (Sonoff): si se lo encontró en la cuenta y si está en línea. */
+  dispositivo: { encontrado: boolean; enLinea: boolean };
+};
+
 /** Un sector agrupa plantas con las mismas necesidades de humedad (ej. Terraza, Interior). */
 export type Sector = {
   id: string;

@@ -7,6 +7,9 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/ui/Button';
 import { Dialog } from '@/ui/Dialog';
 import { Segmented } from '@/ui/Segmented';
+import { needsLinking } from '@/core/ewelink';
+import { requestSettings } from '@/features/settings/settingsRequest';
+import { useEwelinkStatus } from '@/features/settings/useEwelinkStatus';
 import { Skeleton } from '@/ui/Skeleton';
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react';
 import {
@@ -67,6 +70,7 @@ export function RelayTest() {
   const api = useRiegoApi();
   const snapshot = useSnapshot();
   const aviso = useDerived().relayMode === 'aviso';
+  const ewelink = useEwelinkStatus().state;
   const [state, setState] = useState<StatusState>({ kind: 'loading' });
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [seconds, setSeconds] = useState(2);
@@ -154,6 +158,7 @@ export function RelayTest() {
   const disabled = working || blocked !== null || options.length === 0 || !status.ok || aviso;
   const view = statusView(phase, left);
   const rows = deviceRows(status);
+  const linkNotice = !aviso && status.ok && !status.online && !status.simulated && ewelink.phase === 'ready' && needsLinking(ewelink.status);
 
   return (
     <div className="rounded-control border border-line px-4 py-4">
@@ -196,7 +201,20 @@ export function RelayTest() {
         </Button>
       </div>
 
-      {blocked && <p className="mt-3 text-sm text-ink-2">{blocked}</p>}
+      {/* Sin vincular eWeLink, "el regador no responde" no es una falla del equipo: falta vincular. Acceso directo a la sección. */}
+      {linkNotice ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-control border border-line px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-[15px] font-semibold">Vincular eWeLink</p>
+            <p className="text-sm text-ink-2">Para que el regador responda, hace falta vincular tu cuenta de eWeLink.</p>
+          </div>
+          <Button variant="primary" onClick={() => requestSettings({ tab: 'device', anchor: 'ewelink' })}>
+            Vincular eWeLink
+          </Button>
+        </div>
+      ) : (
+        blocked && <p className="mt-3 text-sm text-ink-2">{blocked}</p>
+      )}
 
       <p
         role="status"

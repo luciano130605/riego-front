@@ -230,6 +230,20 @@ describe('HttpRiego: calibración de la planta que se mira', () => {
     expect(api2.getSnapshot().device.calibration).toBeUndefined();
   });
 
+  it('un device.calibration de otro canal o de otra placa no se toma por propio', async () => {
+    const other = { active: true, until: 5, recent: [1] };
+    // La placa calibra el canal ch2, pero la planta a la vista usa "main": no hay calibración para ella.
+    const { fn } = makeFetch(() => json(snapshot({ device: { online: true, lastSeen: 1, readEveryMin: 15, calibration: other }, devices: [dev({ channel: 'ch2', until: 5, recent: [1] })] })));
+    const api = new HttpRiego(BASE, { fetch: fn, storage: null });
+    await api.refresh();
+    expect(api.getSnapshot().device.calibration).toBeUndefined();
+    // Mismo nombre de canal, pero en otra placa: tampoco.
+    const b = makeFetch(() => json(snapshot({ devices: [{ ...dev({ channel: 'main', until: 5, recent: [1] }), id: 'dev-terraza' }] })));
+    const api2 = new HttpRiego(BASE, { fetch: b.fn, storage: null });
+    await api2.refresh();
+    expect(api2.getSnapshot().device.calibration).toBeUndefined();
+  });
+
   it('tomar un punto va a la planta que se mira; con los dos, el servidor guarda y se actualiza', async () => {
     let saved = false;
     const { fn, calls } = makeFetch((c) =>

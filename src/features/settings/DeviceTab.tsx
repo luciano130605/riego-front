@@ -22,6 +22,7 @@ import { needsWifiGuide } from '@/core/wifi';
 import { WifiGuide } from '@/features/device/WifiGuide';
 import { Skeleton } from '@/ui/Skeleton';
 import { CalibrationSection } from './CalibrationSection';
+import { EwelinkSection } from './EwelinkSection';
 import { deviceProblems } from './deviceProblems';
 import { Button } from '@/ui/Button';
 import { DeviceTest } from './deviceTest';
@@ -149,6 +150,8 @@ export function DeviceTab({ save }: Props) {
       )}
 
       <RelayLinkRow />
+
+      <EwelinkSection />
 
       <WifiSection />
 

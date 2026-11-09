@@ -190,6 +190,8 @@ Plantilla en `backend/.env.example` (el `.env` real está en `.gitignore`).
 | `DB_NAME` | no | Nombre de la base (si la URI no lo trae). |
 | `RELAY_HARD_MAX_SECONDS` | no | Tope absoluto de segundos de bomba por orden (por defecto 60). |
 | `EWELINK_APP_ID`, `EWELINK_APP_SECRET`, `EWELINK_DEVICE_ID` | solo con `ewelink` | Credenciales de eWeLink. |
+| `EWELINK_REGION` | no | Región (`cn`, `as`, `us`, `eu`) si el callback no la trae. Por defecto `eu`. |
+| `FRONT_URL` | no | A dónde vuelve el navegador después de vincular eWeLink (`/?ewelink=ok`). Si falta: el primer origen https de `CORS_ORIGIN`. |
 | `TUYA_ACCESS_ID`, `TUYA_ACCESS_SECRET` | solo con `tuya` | Access ID y Access Secret del proyecto en Tuya Cloud. No se loguean. |
 | `TUYA_BASE_URL` | solo con `tuya` | Endpoint del centro de datos del proyecto, sin barra final: `https://openapi.tuyaus.com` (Oeste de EE. UU.), `https://openapi.tuyaeu.com` (Europa central), etc. |
 | `TUYA_DEVICE_ID` | solo con `tuya` | Id del enchufe (lo muestra `iot.tuya.com` > Cloud > Devices). |
@@ -368,20 +370,42 @@ la documentación oficial; lo que no figura ahí está marcado como **sin verifi
 ${PUBLIC_URL}/api/ewelink/callback      # por ejemplo https://tu-backend.up.railway.app/api/ewelink/callback
 ```
 
-**2. Autorizar** (con las variables de producción cargadas, incluida la misma `MONGODB_URI`):
+**2. Vincular desde la pantalla** (o con la API). Hace falta la sesión del PIN:
+
+1. `GET /api/ewelink/login` → `{ ok, url }`: genera un `state` aleatorio de un solo uso (vence a los 10 minutos, guardado en Mongo)
+   y devuelve la URL de eWeLink (`oauth.createLoginUrl` con `grantType: authorization_code` y la redirectUrl de arriba).
+2. El navegador abre esa URL, iniciás sesión en eWeLink y autorizás. eWeLink vuelve a `GET /api/ewelink/callback`
+   (público: lo abre el navegador). El backend valida y consume el `state`, canjea el `code` con `oauth.getToken` usando la
+   región que llega en el callback (o, si falta, `EWELINK_REGION`, o `eu`), guarda los tokens y sus vencimientos en Mongo y
+   **redirige al front**: `FRONT_URL/?ewelink=ok` o `FRONT_URL/?ewelink=error&motivo=<codigo>`. Si falta `FRONT_URL` se usa el
+   primer origen https de `CORS_ORIGIN`. Códigos de `motivo`: `state` (inválido, vencido o ya usado), `faltan-datos`, un
+   número de eWeLink (`10004` = región incorrecta; si eWeLink indica la región correcta se reintenta una vez), `tokens`, `interno`.
+3. Tras vincular consulta la lista de dispositivos de la cuenta para confirmar que `EWELINK_DEVICE_ID` existe y si está en línea.
+4. `GET /api/ewelink/status` (público, sin secretos):
+   `{ ok, configurado, estado: 'sin-vincular' | 'vinculada' | 'vencida' | 'error', region, venceEl, error?, dispositivo: { encontrado, enLinea } }`.
+   `vencida` = el refresh token ya venció (hay que volver a vincular); `error` = falló la renovación o la consulta
+   (con el motivo en español). El chequeo del dispositivo se cachea 60 s.
+5. `DELETE /api/ewelink/link` (PIN) desvincula: borra los tokens guardados.
+
+**Mientras no esté vinculada, `RELAY_DRIVER=ewelink` se comporta como `notify`**: no mueve la bomba, "Regar ahora" solo anota
+el riego y el sistema avisa cuándo regar; al vincular pasa solo al regador real, sin reiniciar.
+
+Al arrancar con `RELAY_DRIVER=ewelink` el backend loguea la *redirectUrl* efectiva (no es secreta) y avisa si `PUBLIC_URL`
+termina en `/` o no es https. Nunca se imprimen tokens, `code`, `state` ni secretos (el log de pedidos quita la query del callback).
+
+Alternativa por consola (con las variables de producción y la misma `MONGODB_URI`):
 
 ```bash
 npm run ewelink:url        # imprime la URL de login; el state queda en Mongo 10 minutos
-# abrí la URL, iniciá sesión en eWeLink y autorizá → el navegador vuelve al callback y dice "Sonoff conectado"
 npm run ewelink:devices    # lista los dispositivos; copiá el id a EWELINK_DEVICE_ID
 ```
 
-Los scripts leen `backend/.env`. Los tokens quedan en Mongo (`config` → `ewelink`) y nunca en logs ni en el snapshot.
+Los scripts leen `backend/.env`. Los tokens y sus vencimientos quedan en Mongo (`config` → `ewelink`) y nunca en logs ni en el snapshot.
 
 **Tokens.** Según la doc oficial el access token dura 30 días y el refresh token 60. El backend renueva
 el access token cuando le quedan menos de 3 días, o si el servidor responde 401/402, y cada 6 h para no
-perder el refresh token si pasan semanas sin regar. Si el refresh falla se registra un incidente
-(`ewelink-refresh`) y habrá que repetir la autorización. El error 407 significa "appid sin permiso": las
+perder el refresh token si pasan semanas sin regar (usa los vencimientos que devuelve la API). Si el refresh falla se registra un incidente
+(`ewelink-refresh`), el estado pasa a `error` y habrá que repetir la autorización. El error 407 significa "appid sin permiso": las
 apps OAuth2.0 gratuitas solo pueden usar un subconjunto de interfaces.
 
 **Apagado garantizado** (la bomba nunca depende de que el servidor siga vivo):

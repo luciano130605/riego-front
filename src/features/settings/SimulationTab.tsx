@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { Fault, LabApi, WifiSim } from '@/data/api';
+import type { EwelinkSim, Fault, LabApi, WifiSim } from '@/data/api';
 import { useDerived, useSnapshot } from '@/data/hooks';
 import { Button } from '@/ui/Button';
 import { Segmented } from '@/ui/Segmented';
@@ -11,6 +11,14 @@ const WIFI_STATES: { value: WifiSim; label: string }[] = [
   { value: 'connected', label: 'Conectada' },
   { value: 'offline', label: 'Sin conexión' },
   { value: 'reset', label: 'Reseteada, espera red' },
+];
+
+const EWELINK_STATES: { value: EwelinkSim; label: string }[] = [
+  { value: 'vinculada', label: 'Vinculada' },
+  { value: 'equipo-sin-conexion', label: 'Equipo sin conexión' },
+  { value: 'sin-vincular', label: 'Sin vincular' },
+  { value: 'vencida', label: 'Vencida' },
+  { value: 'error', label: 'Con error' },
 ];
 
 /** Escenarios de la placa y del sensor. */
@@ -45,6 +53,17 @@ export function SimulationTab({ lab }: { lab: LabApi }) {
           <Button onClick={() => lab.advance(6)}>+6 horas</Button>
           <Button onClick={() => lab.advance(24)}>+1 día</Button>
         </div>
+      </SettingsSection>
+
+      <SettingsSection title="eWeLink (el Sonoff)">
+        <SettingRow label="Vínculo con eWeLink" hint="Sin vincular, vencida o con error, el regador no responde y Configuración ofrece vincularla.">
+          <Segmented
+            label="Estado del vínculo con eWeLink"
+            value={lab.ewelink}
+            onChange={(v) => lab.setEwelink(v as EwelinkSim)}
+            options={EWELINK_STATES}
+          />
+        </SettingRow>
       </SettingsSection>
 
       <SettingsSection title="Humedad de la tierra">

@@ -4,6 +4,7 @@ import type { Sector } from '@/core/types';
 import { useNow, useSnapshot } from '@/data/hooks';
 import { Header } from '@/features/dashboard/Header';
 import { SettingsDialog, type TabId } from '@/features/settings/SettingsDialog';
+import { useSettingsRequest } from '@/features/settings/settingsRequest';
 import { Button } from '@/ui/Button';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Add01Icon, AlertDiamondIcon } from '@hugeicons/core-free-icons';
@@ -26,6 +27,7 @@ export function GardenView() {
   const chip = useChip();
   const [settings, setSettings] = useState<{ open: boolean; tab: TabId }>({ open: false, tab: 'automation' });
   const [dialog, setDialog] = useState<Dialog>(null);
+  useSettingsRequest((tab) => setSettings({ open: true, tab }));
 
   if (snapshot.load === 'loading' && !snapshot.plants) return <GardenSkeleton />;
 

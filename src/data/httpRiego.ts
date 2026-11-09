@@ -4,6 +4,8 @@ import {
   PUSH_KINDS,
   type ActionResult,
   type CaptureResult,
+  type EwelinkLoginResult,
+  type EwelinkStatusResult,
   type AuthApi,
   type AuthState,
   type DeviceTestDetails,
@@ -20,6 +22,7 @@ import {
   type RelayStatus,
   type RiegoApi,
 } from './api';
+import { isSafeRedirect, parseEwelinkStatus } from '@/core/ewelink';
 import { LOGIN_NETWORK, loginErrorText } from './loginError';
 
 const API_ERROR = LOGIN_NETWORK;
@@ -91,12 +94,15 @@ function defaultStorage(): TokenStorage | null {
  * `device.calibration`, que es donde la pantalla ya la lee.
  */
 export function withCalibration(data: Snapshot, scope: string | undefined): Snapshot {
-  if (data.device.calibration || !data.devices || !data.plants) return data;
+  if (!data.devices || !data.plants) return data; // backend viejo: `device.calibration` es de su única planta
+  // `device.calibration` puede ser de otro canal de la misma placa: la fuente es `devices[]`, comparando la placa Y el canal
+  // de la planta (dos placas pueden usar el mismo nombre de canal).
+  const { calibration: _other, ...device } = data.device;
   const plant = scope ? data.plants.find((p) => p.id === scope) : data.plants[0];
   const sensor = plant?.sensor;
   const cal = sensor ? data.devices.find((d) => d.id === sensor.deviceId)?.calibration : undefined;
-  if (!sensor || !cal || cal.channel !== sensor.channel) return data;
-  return { ...data, device: { ...data.device, calibration: { active: true, until: cal.until, recent: cal.recent } } };
+  if (!sensor || !cal || cal.channel !== sensor.channel) return { ...data, device };
+  return { ...data, device: { ...device, calibration: { active: true, until: cal.until, recent: cal.recent } } };
 }
 
 export type HttpRiegoOptions = {
@@ -292,6 +298,32 @@ export class HttpRiego implements RiegoApi, AuthApi {
     if (saved) await this.refresh(); // al guardar cambian rawDry y rawWet de la planta
     return { ok: true, saved };
   };
+
+  // --- eWeLink ---------------------------------------------------------------------------------------------------
+
+  /** Público (no trae secretos). Un 404 es un backend viejo: la sección no se muestra. */
+  ewelinkStatus = async (): Promise<EwelinkStatusResult> => {
+    try {
+      const res = await this.request('/api/ewelink/status');
+      const body = await readBody(res);
+      if (!res.ok) return { ok: false, error: errorOf(res, body), ...(res.status === 404 ? { unavailable: true } : {}) };
+      const status = parseEwelinkStatus(body);
+      return status ? { ok: true, status } : { ok: false, error: 'El servidor respondió algo inesperado.' };
+    } catch {
+      return { ok: false, error: API_ERROR };
+    }
+  };
+
+  ewelinkLogin = async (): Promise<EwelinkLoginResult> => {
+    const sent = await this.authed('GET', '/api/ewelink/login');
+    if ('error' in sent) return { ok: false, error: sent.error };
+    const body = await readBody(sent.res);
+    if (!sent.res.ok) return { ok: false, error: errorOf(sent.res, body) };
+    // Solo se redirige a una dirección http(s): nunca a lo que no lo sea.
+    return isSafeRedirect(body.url) ? { ok: true, url: body.url } : { ok: false, error: 'El servidor respondió algo inesperado.' };
+  };
+
+  ewelinkUnlink = (): Promise<ActionResult> => this.act('DELETE', '/api/ewelink/link');
 
   // --- Sectores y plantas ----------------------------------------------------------------------------------------
 
