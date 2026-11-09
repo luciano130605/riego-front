@@ -5,7 +5,6 @@ import { CyclesList } from '@/features/wateringData/CyclesList';
 import { DailyBars } from '@/features/wateringData/DailyBars';
 import { DecisionsLog } from '@/features/wateringData/DecisionsLog';
 import { Readings24h } from '@/features/wateringData/Readings24h';
-import { RelayTest } from '@/features/wateringData/RelayTest';
 import { PeriodSelect, Section } from '@/features/wateringData/Section';
 import { StatsSummary } from '@/features/wateringData/StatsSummary';
 import { Skeleton } from '@/ui/Skeleton';
@@ -54,10 +53,6 @@ export function WateringDataTab() {
             : 'La última lectura es vieja, así que los datos pueden estar desactualizados.'}
         </p>
       )}
-
-      <Section title="Probar el regador">
-        <RelayTest />
-      </Section>
 
       <Section title="Resumen" aside={<PeriodSelect value={period} onChange={setPeriod} />}>
         <StatsSummary stats={stats} thresholdPct={snapshot.settings.thresholdPct} />

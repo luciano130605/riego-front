@@ -21,6 +21,7 @@ import {
 import { needsWifiGuide } from '@/core/wifi';
 import { WifiGuide } from '@/features/device/WifiGuide';
 import { Skeleton } from '@/ui/Skeleton';
+import { RelayTest } from '@/features/wateringData/RelayTest';
 import { CalibrationSection } from './CalibrationSection';
 import { EwelinkSection } from './EwelinkSection';
 import { deviceProblems } from './deviceProblems';
@@ -150,6 +151,13 @@ export function DeviceTab({ save }: Props) {
       )}
 
       <RelayLinkRow />
+
+      {/* Probar el regador (prender y apagar unos segundos): es del regador, no de una planta ni del automático, así que
+          vive acá y se ve siempre. */}
+      <section className="mt-7">
+        <h3 className="mb-1 text-sm font-semibold text-ink-2">Probar el regador</h3>
+        <RelayTest />
+      </section>
 
       <EwelinkSection />
 
