@@ -8,6 +8,22 @@ const snap = (load: Snapshot['load'], auto: boolean): Pick<Snapshot, 'load' | 's
   settings: { ...DEFAULT_SETTINGS, auto },
 });
 
+describe('automationView con el automático de cada planta', () => {
+  it('la planta con su automático apagado se ve como manual aunque el general esté prendido', () => {
+    const v = automationView(snap('ready', true), false);
+    expect(v.autoEnabled).toBe(false);
+    expect(v.show.nextWatering).toBe(false);
+    expect(v.thresholdLabel(35)).toBe('Aviso bajo 35 %');
+  });
+  it('con el general apagado es manual aunque la planta tenga el suyo prendido', () => {
+    expect(automationView(snap('ready', false), true).autoEnabled).toBe(false);
+  });
+  it('prendidos los dos: automático; sin planta a la vista solo cuenta el general', () => {
+    expect(automationView(snap('ready', true), true).autoEnabled).toBe(true);
+    expect(automationView(snap('ready', true)).autoEnabled).toBe(true);
+  });
+});
+
 describe('automationView', () => {
   it('con el automático prendido se ve todo lo de las reglas automáticas, como siempre', () => {
     const v = automationView(snap('ready', true));

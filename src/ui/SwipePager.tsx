@@ -42,7 +42,7 @@ export function SwipePager({ pages, labels, ariaLabel, className, pageClassName 
   };
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" data-no-swipe>
       <div
         ref={ref}
         role="group"

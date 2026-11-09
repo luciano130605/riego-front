@@ -104,6 +104,7 @@ export function NotificationsButton({ snapshot, derived }: Props) {
                   <li key={e.key} className="flex gap-3 rounded-control px-3 py-2.5">
                     <HugeiconsIcon icon={Icon} size={16} aria-hidden className={bad ? 'mt-0.5 shrink-0 text-alert' : 'mt-0.5 shrink-0 text-ok'} />
                     <div className="min-w-0 flex-1">
+                      {e.where && <p className="text-xs font-medium text-ink-2">{e.where}</p>}
                       <p className="text-sm leading-snug">{e.text}</p>
                       <p className="text-xs text-ink-3">
                         {formatAgo(snapshot.now - e.t)}

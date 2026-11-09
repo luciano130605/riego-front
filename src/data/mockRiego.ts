@@ -1,7 +1,8 @@
 import { decideWatering } from '@/core/decide';
 import { clamp, percentToRaw, rawToPercent } from '@/core/moisture';
-import type { DeviceCalibration, Incident, NightSummary, Reading, SensorStatus, Settings, Snapshot, WaterEvent } from '@/core/types';
+import type { PlantSensor, DeviceCalibration, Incident, NightSummary, Reading, SensorStatus, Settings, Snapshot, WaterEvent } from '@/core/types';
 import { quietHoursOf, validateQuietHours } from '@/core/quietHours';
+import { MAIN_PLANT_ID, MockGarden, type Base } from './mockGarden';
 import { DEFAULT_SETTINGS, READ_EVERY_MIN, sanitizeSettings } from '@/core/settings';
 import {
   type ActionResult,
@@ -17,6 +18,9 @@ import {
   type PushTestResult,
   type RelayStatus,
   type RiegoApi,
+  type PlantInput,
+  type PlantPatch,
+  type SectorInput,
 } from './api';
 
 /** Error de las notificaciones cuando no hay un servidor real detrás (el simulador no manda push). */
@@ -123,6 +127,10 @@ export class MockRiego implements RiegoApi, LabApi {
   private timer: ReturnType<typeof setInterval> | undefined;
 
   private settings: Settings = DEFAULT_SETTINGS;
+  /** Sectores y plantas de ejemplo (2 sectores, 4 plantas, una sin sensor). */
+  private garden = new MockGarden(DEFAULT_SETTINGS);
+  /** Qué planta mira la pantalla (undefined = la vista general). */
+  private scope: string | undefined;
   private samples: RawSample[] = [];
   private events: WaterEvent[] = [];
   private moisture = START_MOISTURE; // humedad real de la tierra
@@ -195,13 +203,98 @@ export class MockRiego implements RiegoApi, LabApi {
       const check = validateQuietHours({ ...quietHoursOf(this.settings), ...patch.quietHours });
       if (!check.ok) return Promise.resolve({ ok: false, error: check.error });
     }
+    // La calibración es de la planta que se mira (la principal, si no hay ninguna a la vista).
+    const gp = this.scope ? this.garden.find(this.scope) : undefined;
+    if (gp && gp.id !== MAIN_PLANT_ID && (patch.rawDry !== undefined || patch.rawWet !== undefined)) {
+      gp.rawDry = patch.rawDry ?? gp.rawDry;
+      gp.rawWet = patch.rawWet ?? gp.rawWet;
+      const { rawDry: _d, rawWet: _w, ...rest } = patch;
+      patch = rest;
+    }
     this.settings = sanitizeSettings(this.settings, patch);
     saveSettings(this.settings);
     this.publish();
     return Promise.resolve({ ok: true });
   };
 
-  waterNow = (): Promise<ActionResult> => {
+  /** Riega la planta que se mira (la principal, si no hay ninguna a la vista). */
+  waterNow = (): Promise<ActionResult> =>
+    this.scope && this.scope !== MAIN_PLANT_ID ? this.waterPlant(this.scope) : this.waterMain();
+
+  waterPlant = (id: string): Promise<ActionResult> => {
+    if (id === MAIN_PLANT_ID) return this.waterMain();
+    if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
+    const res = this.garden.water(id, this.now(), this.settings.waterSeconds);
+    if (res.ok) this.publish();
+    return Promise.resolve(res);
+  };
+
+  // --- Sectores y plantas ---------------------------------------------------------------------------------------
+
+  setPlantScope = (plantId: string | undefined): void => {
+    if (plantId === this.scope) return;
+    this.scope = plantId;
+    this.publish();
+  };
+
+  getPlantScope = (): string | undefined => this.scope;
+
+  /** Aplica un cambio del jardín: con la API caída no se hace nada, y lo que cambia el umbral de la principal llega al simulador. */
+  private garden_(change: () => ActionResult): Promise<ActionResult> {
+    if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
+    const res = change();
+    if (res.ok) {
+      this.syncMainLimits();
+      this.publish();
+    }
+    return Promise.resolve(res);
+  }
+
+  createSector = (input: SectorInput): Promise<ActionResult> => this.garden_(() => this.garden.createSector(input));
+  updateSector = (id: string, patch: Partial<SectorInput>): Promise<ActionResult> => this.garden_(() => this.garden.updateSector(id, patch));
+  deleteSector = (id: string): Promise<ActionResult> => this.garden_(() => this.garden.deleteSector(id));
+  createPlant = (input: PlantInput): Promise<ActionResult> => this.garden_(() => this.garden.createPlant(input, this.settings));
+  updatePlant = (id: string, patch: PlantPatch): Promise<ActionResult> => this.garden_(() => this.garden.updatePlant(id, patch));
+  setPlantSensor = (id: string, sensor: PlantSensor | null): Promise<ActionResult> => this.garden_(() => this.garden.setSensor(id, sensor));
+  archivePlant = (id: string): Promise<ActionResult> => this.garden_(() => this.garden.archive(id, this.now()));
+  restorePlant = (id: string): Promise<ActionResult> => this.garden_(() => this.garden.restore(id));
+
+  /** El umbral y el objetivo que usa el simulador son los efectivos de la planta principal. */
+  private syncMainLimits(): void {
+    const main = this.garden.find(MAIN_PLANT_ID);
+    if (!main) return;
+    const eff = this.garden.effective(main);
+    this.settings = sanitizeSettings(this.settings, { thresholdPct: eff.thresholdPct, targetPct: eff.targetPct });
+    saveSettings(this.settings);
+  }
+
+  /** Sectores, plantas y placas del snapshot. */
+  private gardenFields(now: number, last: RawSample | undefined): Pick<Snapshot, 'sectors' | 'plants' | 'devices'> {
+    const base = this.gardenBase(now, last);
+    return { sectors: this.garden.sectors.map((s) => ({ ...s })), plants: this.garden.views(base), devices: this.garden.devices(base) };
+  }
+
+  private gardenBase(now: number, last: RawSample | undefined): Base {
+    const online = this.cal
+      ? this.cal.lastSampleAt !== undefined
+      : !!last && now - last.t <= OFFLINE_AFTER_S * 1000;
+    const r = last ? this.toReading(last) : undefined;
+    return { moisture: r?.moisture ?? null, raw: last?.raw ?? null, at: last?.t ?? null, online, rssi: last?.rssi };
+  }
+
+  /** El snapshot de la planta que se mira: sus lecturas, riegos, umbral y calibración. Sin planta, el general. */
+  private scoped(built: Snapshot): Snapshot {
+    const gp = this.scope ? this.garden.find(this.scope) : undefined;
+    if (!gp || gp.archivedAt !== undefined) return built;
+    const eff = this.garden.effective(gp);
+    const settings = { ...built.settings, thresholdPct: eff.thresholdPct, targetPct: eff.targetPct, rawDry: gp.rawDry, rawWet: gp.rawWet };
+    if (gp.id === MAIN_PLANT_ID) return { ...built, settings };
+    const base = this.gardenBase(built.now, this.samples[this.samples.length - 1]);
+    const readings = gp.sensor ? built.readings.map((r) => ({ ...r, moisture: this.garden.moistureOf(gp, { ...base, moisture: r.moisture }) ?? r.moisture })) : [];
+    return { ...built, settings, readings, events: [...gp.events] };
+  }
+
+  private waterMain = (): Promise<ActionResult> => {
     if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
     const t = this.now();
     const last = this.events[this.events.length - 1];
@@ -277,6 +370,8 @@ export class MockRiego implements RiegoApi, LabApi {
    */
   startCalibration = (): Promise<ActionResult> => {
     if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
+    const gp = this.scope ? this.garden.find(this.scope) : undefined;
+    if (gp && !gp.sensor) return Promise.resolve({ ok: false, error: 'La planta no tiene sensor.' });
     const t = this.now();
     this.cal = { endsAt: t + CAL_MS, recent: [], count: 0, lastSampleAt: undefined };
     this.sampleCalibration(t);
@@ -451,6 +546,8 @@ export class MockRiego implements RiegoApi, LabApi {
     this.readUntil(realNow);
 
     this.settings = loadSettings();
+    this.garden.reset(this.settings);
+    this.scope = undefined;
     this.lastRebuild = 0;
     this.frozen = undefined;
     this.rebuild();
@@ -600,6 +697,7 @@ export class MockRiego implements RiegoApi, LabApi {
         ...(this.cal ? { calibration: this.calibrationState() } : {}),
       },
       incidents: this.demoIncidents(t),
+      ...this.gardenFields(t, last),
       relayStatus: { driver: 'fake', connected: true, testAvailable: true },
       relay: { driver: 'fake', connected: true, testAvailable: true },
       isDemo: true,
@@ -607,7 +705,7 @@ export class MockRiego implements RiegoApi, LabApi {
     this.snapshot =
       this.fault === 'api-error' && this.frozen
         ? { ...this.frozen, now: t, error: API_ERROR, device: { ...this.frozen.device, online: false } }
-        : built;
+        : this.scoped(built);
   }
 
   /**
@@ -631,7 +729,27 @@ export class MockRiego implements RiegoApi, LabApi {
     }
     // Los dos últimos cruces (bajó y volvió a subir) son los silenciados de la demo.
     crossings.slice(-2).forEach((c) => (c.silenced = true));
+    // Los avisos de una planta traen cuál es y de qué sector (los cruces del simulador son de la principal).
+    const main = this.garden.find(MAIN_PLANT_ID);
+    const mainSector = main ? this.garden.sectorOf(main) : undefined;
+    if (main && mainSector) {
+      for (const c of crossings) Object.assign(c, { plantId: main.id, plantName: main.name, sectorId: mainSector.id, sectorName: mainSector.name });
+    }
     out.push(...crossings);
+    // Una planta de otro sector que está seca: así la campana muestra más de una planta.
+    const tomates = this.garden.find('plant-tomates');
+    if (tomates && tomates.sensor) {
+      const sector = this.garden.sectorOf(tomates);
+      out.push({
+        t: now - 3 * 60 * MIN,
+        kind: 'necesita-riego',
+        message: 'La tierra está seca: hay que regar.',
+        plantId: tomates.id,
+        plantName: tomates.name,
+        sectorId: sector.id,
+        sectorName: sector.name,
+      });
+    }
 
     // La noche que terminó a las 07:00 de hoy (o de ayer, si todavía no pasaron las 07:00): de 23:00 a 07:00.
     const end = new Date(now);

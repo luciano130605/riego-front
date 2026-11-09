@@ -10,11 +10,18 @@ import { Skeleton } from '@/ui/Skeleton';
 import { Switch } from '@/ui/Switch';
 import { ConnectionChip } from './ConnectionChip';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { CustomizeIcon, EcoLab01Icon, Notification01Icon, WaterEnergyIcon } from '@hugeicons/core-free-icons';
+import { ArrowLeft01Icon, CustomizeIcon, EcoLab01Icon, Notification01Icon, WaterEnergyIcon } from '@hugeicons/core-free-icons';
 
-type Props = { onOpenSettings: (tab?: TabId) => void };
+export type HeaderTitle = {
+  /** Título de la página (por defecto, "Mi planta"). */
+  title?: string;
+  /** Link para volver (por ejemplo, de una planta a la vista general). */
+  back?: { href: string; label: string };
+};
 
-export function Header({ onOpenSettings }: Props) {
+type Props = { onOpenSettings: (tab?: TabId) => void } & HeaderTitle;
+
+export function Header({ onOpenSettings, title = 'Mi planta', back }: Props) {
   const snapshot = useSnapshot();
   const derived = useDerived();
   const { save } = useSaveSettings();
@@ -30,7 +37,13 @@ export function Header({ onOpenSettings }: Props) {
     <header className="relative grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 gap-y-3 lg:flex lg:flex-wrap lg:items-center lg:gap-x-3 lg:gap-y-4">
       <div className="contents lg:mr-auto lg:block lg:min-w-0 lg:pr-3">
         <div className="col-start-1 row-start-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-          <h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">Mi planta</h1>
+          {back && (
+            <a href={back.href} className="inline-flex basis-full items-center gap-1 text-sm text-ink-2 transition-colors duration-150 hover:text-ink">
+              <HugeiconsIcon icon={ArrowLeft01Icon} size={16} aria-hidden />
+              {back.label}
+            </a>
+          )}
+          <h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">{title}</h1>
           {snapshot.isDemo &&
             (API_URL ? (
               // Con backend configurado no hay controles de simulación: es solo una etiqueta.

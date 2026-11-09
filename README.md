@@ -210,6 +210,31 @@ Con `TUYA_TEST_DEVICE_ID` definido, `POST /api/relay/test` **sin `seconds`** (re
 
 Para generar secretos: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
 
+### Migración a plantas y sectores
+
+El backend ahora maneja varias plantas agrupadas por sector. **No destructiva e idempotente**: solo agrega el sector
+"Interior" (con el umbral y el objetivo actuales), la planta "Mi planta" (ligada a la placa por defecto, canal `main`, con la
+calibración actual) y les pone `plantId` a las lecturas y riegos que ya existen. No borra ni cambia ningún dato.
+
+**Antes de correrla, hacé un respaldo en Atlas** (la migración solo agrega y asigna, pero conviene poder volver atrás):
+1. *Opción rápida (Atlas):* en el cluster, **Backup > Take Snapshot On Demand** (en clusters M10 o superiores) y esperá a que figure "Completed".
+   En un cluster gratuito (M0) no hay snapshots: usá la opción 2.
+2. *Con `mongodump` (sirve en cualquier cluster):*
+   `mongodump --uri "<MONGODB_URI>" --db <DB_NAME> --out respaldo-antes-de-plantas`
+   (para volver atrás: `mongorestore --uri "<MONGODB_URI>" --drop --db <DB_NAME> respaldo-antes-de-plantas/<DB_NAME>`).
+   Las colecciones que importan: `readings`, `events`, `incidents` y `config` (ajustes y estado de avisos).
+3. Verificá que el respaldo no esté vacío (el tamaño de la carpeta o la cantidad de documentos de `readings`).
+
+Después:
+```
+cd backend
+npm run migrate-plants              # solo cuenta qué haría (no escribe nada)
+npm run migrate-plants -- --confirm # la aplica
+```
+Con la base sin migrar, el servidor **no arranca** y lo dice (así no se despliega código nuevo sobre datos viejos sin respaldo).
+Una base completamente vacía se migra sola. Después de migrar: `POST /api/readings` del firmware 0.2.0 sigue andando sin
+cambios (va al canal `main`), y los endpoints viejos operan sobre la primera planta. Contrato: `backend/docs/API-PLANTAS.md`.
+
 ### API
 
 | Ruta | Auth | Qué hace |

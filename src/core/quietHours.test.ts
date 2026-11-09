@@ -54,7 +54,7 @@ describe('quietHoursToSave', () => {
     });
   });
   it('sin zona del navegador, la de por defecto', () => {
-    expect(quietHoursToSave({}, {}, undefined).tz).toBe(DEFAULT_QUIET.tz);
+    expect(quietHoursToSave({}, {}, null).tz).toBe(DEFAULT_QUIET.tz);
   });
 });
 

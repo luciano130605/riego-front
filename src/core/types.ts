@@ -27,6 +27,8 @@ export type WaterEvent = {
   /** Segundos que estuvo prendida la bomba (o válvula). */
   seconds: number;
   source: WaterSource;
+  /** De qué planta es el riego (un backend viejo no lo manda). */
+  plantId?: string;
 };
 
 /**
@@ -76,6 +78,11 @@ export type Incident = {
   message: string;
   silenced?: boolean;
   summary?: NightSummary;
+  /** Los avisos de una planta traen cuál es y de qué sector; los de la placa o el regador, no. */
+  plantId?: string;
+  plantName?: string;
+  sectorId?: string;
+  sectorName?: string;
 };
 
 export type Settings = {
@@ -180,6 +187,72 @@ export type RelayLink = {
   testDeviceName?: string;
 };
 
+/** Un sector agrupa plantas con las mismas necesidades de humedad (ej. Terraza, Interior). */
+export type Sector = {
+  id: string;
+  name: string;
+  /** Se riega cuando la humedad baja de este valor (%). Las plantas del sector lo heredan salvo que tengan el suyo. */
+  thresholdPct: number;
+  /** Humedad objetivo (%) del sector. */
+  targetPct: number;
+};
+
+/** A qué entrada de qué placa está conectado el sensor de una planta. */
+export type PlantSensor = { deviceId: string; channel: string };
+
+export type Plant = {
+  id: string;
+  name: string;
+  sectorId: string;
+  /** null = planta sin sensor: no se decide ni se avisa nada de ella. */
+  sensor: PlantSensor | null;
+  /** null o ausente = hereda del sector. */
+  thresholdPct?: number | null;
+  targetPct?: number | null;
+  /** Calibración propia (solo tiene sentido con sensor). */
+  rawDry: number;
+  rawWet: number;
+  /** Riego automático de esta planta (además del interruptor general de Settings.auto). */
+  auto: boolean;
+  /** Cuándo se archivó (ms desde epoch). Archivar conserva todos los datos. */
+  archivedAt?: number;
+  /** Reservado para la Fase 2 (una salida de riego por planta). Todavía sin lógica. */
+  outputId?: string | null;
+};
+
+/** ok = bien | needs-water = bajo su umbral | no-data = tiene sensor pero sin lectura válida | no-sensor = sin sensor asignado. */
+export type PlantStatus = 'ok' | 'needs-water' | 'no-data' | 'no-sensor';
+
+/** Lo que el snapshot entrega de cada planta: la planta más lo calculado con su calibración y su umbral efectivo. */
+export type PlantView = Plant & {
+  sectorName: string;
+  /** Umbral y objetivo que valen para esta planta: el propio, o el del sector si hereda. */
+  effectiveThresholdPct: number;
+  effectiveTargetPct: number;
+  /** Humedad (0 a 100) calculada con la calibración de la planta a partir del último raw válido. null si no hay. */
+  moisture: number | null;
+  lastRaw: number | null;
+  lastReadingAt: number | null;
+  status: PlantStatus;
+};
+
+/** Una placa (ESP32). El token nunca se devuelve. */
+export type DeviceInfo = {
+  id: string;
+  name: string;
+  /** La placa por defecto es la del DEVICE_TOKEN original. */
+  isDefault: boolean;
+  online: boolean;
+  lastSeen: number;
+  rssi?: number;
+  fw?: string;
+  uptimeSec?: number;
+  /** Si está en modo calibración: qué canal se calibra. */
+  calibrating?: { channel: string };
+  /** Mientras calibra: lecturas recientes (la más nueva al final) y los puntos ya capturados. */
+  calibration?: { channel: string; until: number; recent: number[]; points?: { dry?: number; wet?: number } };
+};
+
 export type Snapshot = {
   /** 'loading' hasta que llegan los primeros datos. */
   load: 'loading' | 'ready';
@@ -196,6 +269,10 @@ export type Snapshot = {
   relayStatus?: RelayLink;
   /** Igual que `relayStatus` (el backend manda los dos). */
   relay?: RelayLink;
+  /** Sectores, plantas y placas. Un backend viejo no los manda: entonces hay una sola planta (los campos de arriba). */
+  sectors?: Sector[];
+  plants?: PlantView[];
+  devices?: DeviceInfo[];
   /** true mientras los datos son simulados (todavía sin backend). */
   isDemo: boolean;
 };

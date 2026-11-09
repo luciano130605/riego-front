@@ -1,5 +1,5 @@
 import { captureValue, stability, validateCalibration, type Stability, type Validation } from '@/core/calibration';
-import type { RiegoApi } from '@/data/api';
+import type { CaptureResult, RiegoApi } from '@/data/api';
 
 /**
  * Controlador de la calibración asistida. No usa React: guarda el estado de los dos pasos (aire y agua),
@@ -38,13 +38,15 @@ export type FlowState = {
   saving: boolean;
 };
 
-type Api = Pick<RiegoApi, 'subscribe' | 'getSnapshot' | 'now' | 'startCalibration' | 'stopCalibration'>;
+type Api = Pick<RiegoApi, 'subscribe' | 'getSnapshot' | 'now' | 'startCalibration' | 'stopCalibration' | 'captureCalibration'>;
 
 /** Si pasa más que esto sin lecturas nuevas de la placa, se avisa que se está esperando. */
 const SILENCE_MS = 12_000;
 const TICK_MS = 500;
 
 export class CalibrationFlow {
+  /** Los puntos que tomó el servidor (si la API los toma ahí), para esperarlos antes de dar por guardada la calibración. */
+  private serverCaptures: { dry?: Promise<CaptureResult>; wet?: Promise<CaptureResult> } = {};
   private listeners = new Set<() => void>();
   private state: FlowState;
   private unsubscribe: (() => void) | undefined;
@@ -178,6 +180,7 @@ export class CalibrationFlow {
       this.set({ problem: 'El valor todavía se mueve. Esperá a que esté estable.' });
       return;
     }
+    this.serverCaptures = { dry: this.api.captureCalibration?.('dry') };
     this.set({ rawDry: v, rawWet: null, step: 'water', problem: undefined });
   }
 
@@ -190,6 +193,7 @@ export class CalibrationFlow {
       return;
     }
     // Se fija igual: el resultado se muestra con el aviso (rango muy chico o valores invertidos) y no deja guardar.
+    this.serverCaptures.wet = this.api.captureCalibration?.('wet');
     this.set({ rawWet: v, step: 'review', check: validateCalibration(this.state.rawDry, v), problem: undefined });
   }
 
@@ -197,6 +201,21 @@ export class CalibrationFlow {
   restart(): void {
     if (this.state.phase !== 'running') return;
     this.set({ step: 'air', rawDry: null, rawWet: null, check: undefined, problem: undefined });
+  }
+
+  /** 'none' = la API no toma puntos en el servidor; 'saved' = ya la guardó; 'failed' = no pudo (el problema ya se avisó). */
+  private async awaitServerCapture(): Promise<'none' | 'saved' | 'failed'> {
+    const { dry, wet } = this.serverCaptures;
+    if (!dry || !wet) return 'none';
+    const [d, w] = await Promise.all([dry, wet]);
+    const bad = !d.ok ? d : !w.ok ? w : undefined;
+    if (bad && !bad.ok) {
+      this.set({ saving: false, problem: bad.error });
+      return 'failed';
+    }
+    if (w.ok && w.saved) return 'saved';
+    this.set({ saving: false, problem: 'El servidor todavía no tiene los dos puntos. Volvé a tomarlos.' });
+    return 'failed';
   }
 
   /** Guarda la calibración con updateSettings y termina. Si no se pudo guardar, lo dice y sigue. */
@@ -209,7 +228,11 @@ export class CalibrationFlow {
       return;
     }
     this.set({ saving: true, problem: undefined });
-    const ok = await save({ rawDry, rawWet });
+    // Si el servidor toma los puntos, él guarda la calibración de ESTA planta al tener los dos: se espera su respuesta y no
+    // se manda un PUT de ajustes (que iría a la primera planta).
+    const server = await this.awaitServerCapture();
+    if (server === 'failed') return;
+    const ok = server === 'saved' ? true : await save({ rawDry, rawWet });
     if (!ok) {
       this.set({ saving: false, problem: 'No se pudo guardar la calibración. Probá de nuevo.' });
       return;

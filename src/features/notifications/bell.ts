@@ -16,9 +16,27 @@ const INCIDENT_KINDS: Partial<Record<LogKind, string[]>> = {
   back: ['placa-vuelve'],
 };
 
-export type BellEntry = LogEntry & { key: string; silenced: boolean };
+export type BellEntry = LogEntry & {
+  key: string;
+  silenced: boolean;
+  /** De qué planta es el aviso: "Monstera · Interior". Los de la placa o el regador no la tienen. */
+  where?: string;
+};
 export type BellSummary = { key: string; t: number; lines: string[] };
 export type BellView = { summary?: BellSummary; entries: BellEntry[] };
+
+/** Qué entrada de la campana es cada tipo de aviso del servidor (los demás no van en la campana). */
+const KIND_OF_INCIDENT: Record<string, LogKind> = {
+  'humedad-baja': 'dry',
+  'necesita-riego': 'dry',
+  'humedad-recuperada': 'recovered',
+  'placa-offline': 'fault',
+  'sensor-sospechoso': 'fault',
+  'placa-vuelve': 'back',
+};
+
+const whereOf = (n: Pick<Incident, 'plantName' | 'sectorName'>): string | undefined =>
+  n.plantName ? (n.sectorName ? `${n.plantName} · ${n.sectorName}` : n.plantName) : undefined;
 
 export const entryKey = (e: Pick<LogEntry, 'kind' | 'text' | 't'>): string => `${e.kind}-${e.t}`;
 
@@ -40,11 +58,24 @@ export function buildBell(snapshot: Snapshot, dismissed: ReadonlySet<string>): B
   const incidents = snapshot.incidents ?? [];
   const pool = incidents.filter((n) => n.silenced === true);
 
-  const entries = buildLog(snapshot, 200)
-    .filter((e) => ALERT_KINDS.includes(e.kind) && snapshot.now - e.t <= WINDOW_MS)
-    .map((e): BellEntry => ({ ...e, key: entryKey(e), silenced: silencedFor(e, pool) }))
-    .filter((e) => !dismissed.has(e.key))
-    .slice(0, MAX_ENTRIES);
+  // Con sectores y plantas, el registro armado en la pantalla solo vería UNA planta: los avisos son los que registra el
+  // servidor, cada uno con su planta y su sector. Sin ellos (backend viejo) se arma como siempre.
+  const entries: BellEntry[] =
+    snapshot.plants !== undefined
+      ? incidents
+          .filter((n) => n.kind in KIND_OF_INCIDENT && n.t <= snapshot.now && snapshot.now - n.t <= WINDOW_MS)
+          .map((n): BellEntry => {
+            const e = { kind: KIND_OF_INCIDENT[n.kind], text: n.message, t: n.t };
+            return { ...e, key: `${n.plantId ?? 'placa'}-${entryKey(e)}`, silenced: n.silenced === true, ...(whereOf(n) ? { where: whereOf(n) } : {}) };
+          })
+          .filter((e) => !dismissed.has(e.key))
+          .sort((a, b) => b.t - a.t)
+          .slice(0, MAX_ENTRIES)
+      : buildLog(snapshot, 200)
+          .filter((e) => ALERT_KINDS.includes(e.kind) && snapshot.now - e.t <= WINDOW_MS)
+          .map((e): BellEntry => ({ ...e, key: entryKey(e), silenced: silencedFor(e, pool) }))
+          .filter((e) => !dismissed.has(e.key))
+          .slice(0, MAX_ENTRIES);
 
   const latest = incidents
     .filter((n) => n.kind === 'night-summary' && n.summary && n.t <= snapshot.now && snapshot.now - n.t <= WINDOW_MS)

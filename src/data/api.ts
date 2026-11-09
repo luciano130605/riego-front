@@ -1,4 +1,4 @@
-import type { Settings, Snapshot } from '@/core/types';
+import type { PlantSensor, Settings, Snapshot } from '@/core/types';
 
 /**
  * Lo único que la pantalla sabe del mundo. Hoy lo implementa el simulador
@@ -22,6 +22,23 @@ export type DeviceTestDetails = {
   seconds?: number;
 };
 
+/** Resultado de tomar un punto de la calibración en el servidor. `saved`: con los dos puntos, el servidor ya la guardó. */
+export type CaptureResult = { ok: true; saved: boolean } | { ok: false; error: string };
+
+/** Un sector nuevo. */
+export type SectorInput = { name: string; thresholdPct: number; targetPct: number };
+/** Una planta nueva. `thresholdPct` / `targetPct` null o ausentes = usa el del sector. */
+export type PlantInput = {
+  name: string;
+  sectorId: string;
+  sensor?: PlantSensor | null;
+  thresholdPct?: number | null;
+  targetPct?: number | null;
+  auto?: boolean;
+};
+/** Lo que se puede editar de una planta (mover de sector = cambiar `sectorId`). */
+export type PlantPatch = Partial<Pick<PlantInput, 'name' | 'sectorId' | 'thresholdPct' | 'targetPct' | 'auto'>>;
+
 export interface RiegoApi {
   subscribe(listener: () => void): () => void;
   getSnapshot(): Snapshot;
@@ -32,7 +49,7 @@ export interface RiegoApi {
   waterNow(): Promise<ActionResult>;
   /**
    * Prende el regador `seconds` segundos solo para probarlo. No crea un evento de riego
-   * ni toca el historial.
+   * ni toca el historial. Necesita sesión (en el backend real pide el PIN).
    */
   testRelay(seconds: number): Promise<ActionResult>;
   /**
@@ -40,12 +57,38 @@ export interface RiegoApi {
    * servidor; no se da por buena hasta que responde.
    */
   testDevice(): Promise<DeviceTestResult>;
+
+  // --- Sectores y plantas ---------------------------------------------------------------------------------------
+  /**
+   * Qué planta mira la pantalla: el snapshot trae SUS lecturas, riegos, umbral y calibración (así los componentes de
+   * siempre sirven para cualquier planta). `undefined` = la vista general. Mientras llegan los datos de la nueva
+   * planta, `load` vuelve a 'loading'.
+   */
+  setPlantScope(plantId: string | undefined): void;
+  getPlantScope(): string | undefined;
+  createSector(input: SectorInput): Promise<ActionResult>;
+  updateSector(id: string, patch: Partial<SectorInput>): Promise<ActionResult>;
+  deleteSector(id: string): Promise<ActionResult>;
+  createPlant(input: PlantInput): Promise<ActionResult>;
+  updatePlant(id: string, patch: PlantPatch): Promise<ActionResult>;
+  /** Asigna el sensor (placa y canal) o lo quita (null: la planta queda sin sensor). */
+  setPlantSensor(id: string, sensor: PlantSensor | null): Promise<ActionResult>;
+  /** Archivar conserva todos los datos y libera el canal del sensor. */
+  archivePlant(id: string): Promise<ActionResult>;
+  restorePlant(id: string): Promise<ActionResult>;
+  /** Riega (o anota el riego de) una planta, tenga sensor o no. */
+  waterPlant(id: string): Promise<ActionResult>;
   /** Estado del regador (el relé), para saber si se puede probar. */
   relayStatus(): Promise<RelayStatus>;
   /** Empieza la calibración asistida: la placa manda lecturas seguidas (llegan en `snapshot.device.calibration`). */
   startCalibration(): Promise<ActionResult>;
   /** Termina la calibración y la placa vuelve a su ritmo normal. */
   stopCalibration(): Promise<ActionResult>;
+  /**
+   * Toma un punto de la calibración EN EL SERVIDOR (lo hace con sus propias lecturas de la planta a la vista). Con los
+   * dos puntos el servidor valida y la guarda. El simulador no lo tiene: ahí se guarda con `updateSettings`.
+   */
+  captureCalibration?(point: 'dry' | 'wet'): Promise<CaptureResult>;
   /** Clave pública VAPID del servidor (no necesita sesión). */
   pushPublicKey(): Promise<PushKeyResult>;
   /** Registra (o actualiza) este dispositivo en el servidor. Necesita sesión. Devuelve sus preferencias. */
@@ -145,4 +188,31 @@ export interface LabApi {
   forceMoisture(pct: number): void;
   setFault(fault: Fault): void;
   reset(): void;
+}
+
+/** `signedIn`: hay una sesión guardada (el token). Sin ella la pantalla muestra la entrada. */
+export type AuthState = { pinRequested: boolean; signedIn: boolean; error?: string };
+
+/**
+ * Extensión opcional de RiegoApi para el backend real: la sesión (token) y el pedido de PIN. Con backend, sin sesión
+ * se ve la pantalla de entrada; el diálogo del PIN solo sale para confirmar acciones sensibles (activar notificaciones).
+ */
+export interface AuthApi {
+  subscribeAuth(listener: () => void): () => void;
+  getAuthState(): AuthState;
+  /** Intenta entrar con el PIN. true = quedó la sesión. */
+  submitPin(pin: string): Promise<boolean>;
+  /** El usuario cerró el diálogo del PIN sin entrar. */
+  cancelPin(): void;
+  /**
+   * Pide el PIN ahora, aunque la sesión siga abierta (para acciones que lo exigen siempre, como activar las
+   * notificaciones). true = se puso bien; false = cerraron el diálogo.
+   */
+  confirmPin(): Promise<boolean>;
+  /** Cierra la sesión: borra el token y la pantalla vuelve a la entrada. */
+  signOut(): void;
+}
+
+export function isAuthApi(api: RiegoApi): api is RiegoApi & AuthApi {
+  return typeof (api as Partial<AuthApi>).submitPin === 'function';
 }

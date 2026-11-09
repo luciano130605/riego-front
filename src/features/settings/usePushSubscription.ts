@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NOTIF } from '@/core/copy';
-import { type ActionResult, type PushKind, type PushPrefs, type PushTestResult } from '@/data/api';
+import { isAuthApi, type ActionResult, type PushKind, type PushPrefs, type PushTestResult } from '@/data/api';
 import { useRiegoApi } from '@/data/hooks';
 import { pushSupport, urlBase64ToUint8Array, type PushSupport } from '@/lib/push';
 
@@ -77,6 +77,12 @@ export function usePushSubscription() {
     if (support !== 'ok') return { ok: false, error: NOTIF.unsupported };
     patch({ loading: true });
     try {
+      // Para activar siempre se pide el PIN, aunque la sesión siga abierta (con datos de prueba no hay PIN).
+      // El clic en "Entrar" del PIN cuenta como gesto del usuario para el permiso del navegador de abajo.
+      if (isAuthApi(api) && !(await api.confirmPin())) {
+        patch({ loading: false });
+        return { ok: false, error: NOTIF.pinCancelled };
+      }
       // El permiso se pide primero: tiene que ser justo después del clic del usuario.
       const permission = await Notification.requestPermission();
       patch({ permission });

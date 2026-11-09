@@ -1,6 +1,7 @@
 import { useId, useRef, type KeyboardEvent } from 'react';
 import { API_URL } from '@/data/env';
-import { useAutomation, useLab } from '@/data/hooks';
+import { useAutomation, useLab, useSnapshot } from '@/data/hooks';
+import { usePlantScope } from '@/data/plantScope';
 import { cn } from '@/lib/cn';
 import { Dialog } from '@/ui/Dialog';
 import { AutomationTab } from './AutomationTab';
@@ -56,14 +57,17 @@ function SaveStatus({ state }: { state: SaveState }) {
 export function SettingsDialog({ open, tab, onTab, onClose }: Props) {
   const lab = useLab();
   const auto = useAutomation();
+  const snapshot = useSnapshot();
+  const scope = usePlantScope();
   const { save, state } = useSaveSettings();
   const saving = useSettingsSaving();
   const baseId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   // La simulación solo existe con datos del simulador y sin backend configurado (VITE_API_URL).
-  // Datos de riego es del automático: apagado, la pestaña no existe. Si estabas ahí, vuelve a Automatización.
+  // Datos de riego es del automático: apagado, la pestaña no existe. Con varias plantas es de UNA planta: sin ninguna a
+  // la vista tampoco. Si estabas ahí, vuelve a Automatización.
   const tabs = TABS.filter(
-    (t) => (t.id !== 'simulation' || (lab && !API_URL)) && (t.id !== 'watering-data' || auto.show.wateringData),
+    (t) => (t.id !== 'simulation' || (lab && !API_URL)) && (t.id !== 'watering-data' || (auto.show.wateringData && (snapshot.plants === undefined || !!scope))),
   );
   const current = tabs.some((t) => t.id === tab) ? tab : 'automation';
 

@@ -357,6 +357,8 @@ export const NOTIF = {
   denied: 'No permitiste las notificaciones, así que quedan desactivadas.',
   activated: 'Notificaciones activadas.',
   deactivated: 'Notificaciones desactivadas.',
+  needsPin: 'Para activarlas hace falta el PIN. Después el navegador te pregunta si las permitís.',
+  pinCancelled: 'Hace falta el PIN para activar las notificaciones.',
   testSent: 'Listo: te mandamos una notificación de prueba.',
   testExpired: 'La suscripción de este dispositivo venció. Desactivá y volvé a activar las notificaciones.',
   testKindSent: (label: string): string => `Te mandamos la prueba de “${label}”. Mirá este dispositivo.`,
@@ -497,5 +499,26 @@ export const BELL = {
   silenced: 'silenciado',
   dismiss: 'Descartar aviso',
   dismissSummary: 'Descartar el resumen de la noche',
+} as const;
+
+// --- Sectores y plantas ----------------------------------------------------------------------------------------
+
+export const PLANT_STATUS = {
+  ok: 'En rango',
+  'needs-water': 'Necesita agua',
+  'no-data': 'Sin datos',
+  'no-sensor': 'Sin sensor',
+} as const;
+
+export const PLANTS = {
+  all: 'Todos',
+  noPlants: 'Sin plantas',
+  noSensors: 'Ninguna planta tiene sensor',
+  allInRange: 'Todas en rango',
+  needWater: (n: number, of: number): string => `${n} de ${of} ${n === 1 ? 'necesita' : 'necesitan'} agua`,
+  noData: (n: number): string => `${n} sin datos`,
+  lastReading: (ago: string): string => `Última lectura ${ago}`,
+  noReadingYet: 'Sin lecturas todavía',
+  usesSector: 'usa el del sector',
 } as const;
 

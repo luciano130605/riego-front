@@ -2,7 +2,9 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react
 import { COMMS, offlineSince, SENSOR_STATE, WIFI } from '@/core/copy';
 import { formatAgo, formatDuration, formatSeconds, longDateTime, num, rssiQuality } from '@/core/format';
 import type { Settings } from '@/core/types';
+import { isAuthApi } from '@/data/api';
 import { SHOW_TEST } from '@/data/env';
+import { usePlantScope } from '@/data/plantScope';
 import { useDeviceView, useDerived, useRiegoApi, useSnapshot } from '@/data/hooks';
 import { cn } from '@/lib/cn';
 import { HugeiconsIcon } from '@hugeicons/react';
@@ -24,7 +26,7 @@ import { deviceProblems } from './deviceProblems';
 import { Button } from '@/ui/Button';
 import { DeviceTest } from './deviceTest';
 import { testHint, testResultText } from './deviceTestCopy';
-import { SettingsSection } from './SettingRow';
+import { SettingRow, SettingsSection } from './SettingRow';
 
 type Props = { save: (patch: Partial<Settings>, okMessage?: string) => Promise<boolean> };
 
@@ -39,6 +41,10 @@ function Item({ label, children }: { label: string; children: ReactNode }) {
 
 export function DeviceTab({ save }: Props) {
   const snapshot = useSnapshot();
+  const scope = usePlantScope();
+  // Con sectores y plantas hay varias placas (una sección por placa) y la calibración es de una planta con sensor.
+  const multi = snapshot.plants !== undefined;
+  const sensorView = !multi || !!scope?.plant.sensor;
   const { online, offlineForMs, lastReading, sensor, now } = useDeviceView();
   const { device } = snapshot;
   const list = deviceProblems(snapshot, now);
@@ -57,7 +63,10 @@ export function DeviceTab({ save }: Props) {
 
   return (
     <div>
-      <SettingsSection title="Placa ESP32">
+      {multi && <DevicesSection />}
+
+      {sensorView && (
+      <SettingsSection title={multi ? `Sensor de ${scope?.plant.name ?? 'la planta'}` : 'Placa ESP32'}>
         <dl>
           <Item label="Conexión">
             <span className="inline-flex items-center gap-2">
@@ -137,12 +146,23 @@ export function DeviceTab({ save }: Props) {
           </Item>
         </dl>
       </SettingsSection>
+      )}
 
       <RelayLinkRow />
 
       <WifiSection />
 
-      <CalibrationSection save={save} />
+      {!multi || scope?.plant.sensor ? (
+        <CalibrationSection save={save} />
+      ) : (
+        <SettingsSection title="Calibración">
+          <p className="text-[15px] text-ink-2">
+            {scope ? 'Esta planta no tiene sensor: no se puede calibrar. Asignale uno desde su ficha.' : 'La calibración es de cada planta con sensor. Abrí una planta para calibrar el suyo.'}
+          </p>
+        </SettingsSection>
+      )}
+
+      <SessionSection />
     </div>
   );
 }
@@ -167,6 +187,65 @@ function RelayLinkRow() {
         {on ? `${name} conectado` : `${name} desconectado`}
       </p>
       {SHOW_TEST && relay?.testAvailable === true && <TestDeviceButton />}
+    </SettingsSection>
+  );
+}
+
+/**
+ * Las placas, una sección por placa: si está en línea, hace cuánto reportó, la señal de wifi, el firmware, cuánto lleva
+ * encendida, qué plantas tiene conectadas y, si está calibrando, qué canal. Sale tal cual lo informa el servidor.
+ */
+function DevicesSection() {
+  const { devices = [], plants = [], now, error, load } = useSnapshot();
+  if (load === 'loading') {
+    return (
+      <SettingsSection title="Placas">
+        <div aria-busy="true" aria-label="Placas">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="mt-3 h-5 w-56 max-w-full" />
+        </div>
+      </SettingsSection>
+    );
+  }
+  return (
+    <>
+      {devices.map((d) => {
+        const connected = d.online && !error;
+        const on = plants.filter((p) => p.sensor?.deviceId === d.id);
+        return (
+          <SettingsSection key={d.id} title={`Placa: ${d.name}`}>
+            <dl>
+              <Item label="Conexión">
+                <span className="inline-flex items-center gap-2">
+                  <span aria-hidden className={cn('size-2 rounded-full', connected ? 'bg-ok' : 'bg-alert')} />
+                  {connected ? 'En línea' : 'Sin conexión'}
+                </span>
+              </Item>
+              <Item label="Último reporte">{d.lastSeen > 0 ? `${longDateTime(d.lastSeen)} (${formatAgo(now - d.lastSeen)})` : 'Sin reportes'}</Item>
+              {d.rssi !== undefined && <Item label="Señal wifi">{`${num(d.rssi).replace('-', '−')} dBm · ${rssiQuality(d.rssi)}`}</Item>}
+              <Item label="Versión del firmware">{d.fw ?? 'La placa no lo informa'}</Item>
+              {d.uptimeSec !== undefined && <Item label="Encendida">{formatDuration(d.uptimeSec / 3600)}</Item>}
+              <Item label="Plantas conectadas">
+                {on.length === 0 ? 'Ninguna' : on.map((p) => `${p.name} (${p.sensor!.channel})`).join(', ')}
+              </Item>
+              {d.calibrating && <Item label="Calibrando">{`Canal ${d.calibrating.channel}`}</Item>}
+            </dl>
+          </SettingsSection>
+        );
+      })}
+    </>
+  );
+}
+
+/** "Salir": solo con backend real, donde hay sesión. Borra el token y vuelve a la entrada. */
+function SessionSection() {
+  const api = useRiegoApi();
+  if (!isAuthApi(api)) return null;
+  return (
+    <SettingsSection title="Sesión">
+      <SettingRow label="Salir" hint="Cierra la sesión en este navegador. Para volver a entrar hace falta el PIN.">
+        <Button onClick={() => api.signOut()}>Salir</Button>
+      </SettingRow>
     </SettingsSection>
   );
 }

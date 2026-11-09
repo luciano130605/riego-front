@@ -154,7 +154,8 @@ describe('MockRiego: simulación', () => {
     api.updateSettings({ thresholdPct: 50 });
     api.reset();
     const s = api.getSnapshot();
-    expect(s.settings).toEqual(DEFAULT_SETTINGS);
+    // El simulador arranca con "No molestar" prendido (para ver el resumen de la noche y los avisos silenciados).
+    expect(s.settings).toEqual({ ...DEFAULT_SETTINGS, quietHours: { ...DEFAULT_SETTINGS.quietHours!, enabled: true } });
     expect(s.readings.length).toBeLessThan(2910);
   });
 });

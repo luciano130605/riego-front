@@ -5,6 +5,7 @@ import type { Snapshot } from '@/core/types';
 import type { LabApi, RiegoApi } from './api';
 import { RiegoContext } from './context';
 import { derive, type Derived } from './derive';
+import { usePlantScope } from './plantScope';
 
 function useRiegoContext() {
   const ctx = useContext(RiegoContext);
@@ -66,6 +67,8 @@ export function useDeviceView(): DeviceView & { now: number } {
 /** Qué se ve según el interruptor "Automático": la única fuente de verdad (ver `core/automation.ts`). */
 export function useAutomation(): AutomationView {
   const { load, settings } = useSnapshot();
-  return useMemo(() => automationView({ load, settings }), [load, settings]);
+  // Con una planta a la vista, cuenta también su propio automático.
+  const plantAuto = usePlantScope()?.plant.auto;
+  return useMemo(() => automationView({ load, settings }, plantAuto), [load, settings, plantAuto]);
 }
 

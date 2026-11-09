@@ -18,6 +18,8 @@ type Props = {
 export function AutomationTab({ save, saving }: Props) {
   const { settings: s } = useSnapshot();
   const auto = useAutomation();
+  // Con sectores y plantas el umbral y el objetivo se editan por sector (y por planta), no acá.
+  const multi = useSnapshot().plants !== undefined;
   const until = s.mode === 'until-target';
   const aviso = useRelayMode() === 'aviso';
 
@@ -47,7 +49,15 @@ export function AutomationTab({ save, saving }: Props) {
   );
 
   // Umbral y objetivo de humedad: además del riego automático, son los de los avisos al celular, así que se ven siempre.
-  const alertsSection = (
+  const limitsPointer = (
+    <SettingsSection title="Umbral y objetivo">
+      <p className="text-[15px] text-ink-2">
+        El umbral y el objetivo de humedad se editan por sector, en la vista general. Cada planta puede tener los suyos desde su ficha.
+      </p>
+    </SettingsSection>
+  );
+
+  const alertsSection = multi ? limitsPointer : (
       <SettingsSection title="Cuándo avisar">
         <SettingRow label="Avisar cuando baje de" hint="La humedad que dispara el aviso.">
           <Stepper
@@ -131,32 +141,36 @@ export function AutomationTab({ save, saving }: Props) {
           </p>
         </div>
 
-        <SettingRow label="Empezar a regar cuando baje de" hint="La humedad que dispara el riego.">
-          <Stepper
-            label="humedad que dispara el riego"
-            display={`${s.thresholdPct} %`}
-            value={s.thresholdPct}
-            min={10}
-            max={70}
-            onChange={(thresholdPct) => void save({ thresholdPct })}
-          />
-        </SettingRow>
+        {!multi && (
+          <SettingRow label="Empezar a regar cuando baje de" hint="La humedad que dispara el riego.">
+            <Stepper
+              label="humedad que dispara el riego"
+              display={`${s.thresholdPct} %`}
+              value={s.thresholdPct}
+              min={10}
+              max={70}
+              onChange={(thresholdPct) => void save({ thresholdPct })}
+            />
+          </SettingRow>
+        )}
 
         {until ? (
           <>
-            <SettingRow
-              label="Regar hasta llegar a"
-              hint="Cuando la lectura alcanza este valor, el riego termina."
-            >
-              <Stepper
-                label="humedad objetivo"
-                display={`${s.targetPct} %`}
-                value={s.targetPct}
-                min={s.thresholdPct + 5}
-                max={95}
-                onChange={(targetPct) => void save({ targetPct })}
-              />
-            </SettingRow>
+            {!multi && (
+              <SettingRow
+                label="Regar hasta llegar a"
+                hint="Cuando la lectura alcanza este valor, el riego termina."
+              >
+                <Stepper
+                  label="humedad objetivo"
+                  display={`${s.targetPct} %`}
+                  value={s.targetPct}
+                  min={s.thresholdPct + 5}
+                  max={95}
+                  onChange={(targetPct) => void save({ targetPct })}
+                />
+              </SettingRow>
+            )}
             <SettingRow
               label="Duración de cada tanda"
               hint={`Con “Hasta llegar al objetivo” el riego sigue hasta llegar a ${s.targetPct} %, así que la duración no se fija acá. “Regar ahora” sigue regando ${formatSeconds(s.waterSeconds)}.`}

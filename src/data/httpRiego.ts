@@ -1,9 +1,15 @@
 import { DEFAULT_SETTINGS, READ_EVERY_MIN } from '@/core/settings';
-import type { Settings, Snapshot } from '@/core/types';
+import type { PlantSensor, Settings, Snapshot } from '@/core/types';
 import {
   PUSH_KINDS,
   type ActionResult,
+  type CaptureResult,
+  type AuthApi,
+  type AuthState,
   type DeviceTestDetails,
+  type PlantInput,
+  type PlantPatch,
+  type SectorInput,
   type DeviceTestResult,
   type PushKeyResult,
   type PushKind,
@@ -14,7 +20,11 @@ import {
   type RelayStatus,
   type RiegoApi,
 } from './api';
-const API_ERROR = 'No se pudo conectar con el servidor.';
+import { LOGIN_NETWORK, loginErrorText } from './loginError';
+
+const API_ERROR = LOGIN_NETWORK;
+const SESSION_EXPIRED = 'La sesión venció. Entrá de nuevo.';
+const TOKEN_KEY = 'riego-aut:token';
 /** Respuestas de un proxy cuando el servidor de atrás no está: cuentan como "no responde". */
 const GATEWAY_DOWN = new Set([502, 503, 504]);
 
@@ -65,6 +75,30 @@ function isTunnelUrl(base: string): boolean {
   }
 }
 
+type TokenStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+function defaultStorage(): TokenStorage | null {
+  try {
+    // Fuera del navegador (tests, servidor) no hay dónde guardar: la sesión dura lo que dure el objeto.
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * La calibración en curso llega en `devices[]` (por placa y canal). Si es la del canal de la planta que se mira, pasa a
+ * `device.calibration`, que es donde la pantalla ya la lee.
+ */
+export function withCalibration(data: Snapshot, scope: string | undefined): Snapshot {
+  if (data.device.calibration || !data.devices || !data.plants) return data;
+  const plant = scope ? data.plants.find((p) => p.id === scope) : data.plants[0];
+  const sensor = plant?.sensor;
+  const cal = sensor ? data.devices.find((d) => d.id === sensor.deviceId)?.calibration : undefined;
+  if (!sensor || !cal || cal.channel !== sensor.channel) return data;
+  return { ...data, device: { ...data.device, calibration: { active: true, until: cal.until, recent: cal.recent } } };
+}
+
 export type HttpRiegoOptions = {
   /** Para tests. Por defecto, el fetch del navegador. */
   fetch?: typeof fetch;
@@ -72,6 +106,8 @@ export type HttpRiegoOptions = {
   pollMs?: number;
   /** Cuánto se espera una respuesta antes de darla por perdida. */
   timeoutMs?: number;
+  /** Dónde se guarda el token de sesión. null = solo en memoria. */
+  storage?: TokenStorage | null;
 };
 
 function isSnapshot(x: unknown): x is Snapshot {
@@ -129,8 +165,15 @@ function parsePrefs(x: unknown): PushPrefs | undefined {
  * no note la diferencia: snapshot estable (useSyncExternalStore), `load: 'loading'` al
  * arrancar, `error` con los últimos datos conocidos cuando falla la conexión.
  */
-export class HttpRiego implements RiegoApi {
+export class HttpRiego implements RiegoApi, AuthApi {
   private listeners = new Set<() => void>();
+  private authListeners = new Set<() => void>();
+  private auth: AuthState = { pinRequested: false, signedIn: false };
+  private pinWaiters: Array<(ok: boolean) => void> = [];
+  private token: string | undefined;
+  /** Qué planta mira la pantalla (undefined = la vista general: la primera planta). */
+  private scope: string | undefined;
+  private readonly storage: TokenStorage | null;
   private snapshot: Snapshot;
   private timer: ReturnType<typeof setInterval> | undefined;
   private offsetMs = 0; // servidor − reloj local
@@ -152,6 +195,13 @@ export class HttpRiego implements RiegoApi {
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
     this.pollMs = options.pollMs ?? 30_000;
     this.timeoutMs = options.timeoutMs ?? 10_000;
+    this.storage = options.storage === undefined ? defaultStorage() : options.storage;
+    try {
+      this.token = this.storage?.getItem(TOKEN_KEY) ?? undefined;
+    } catch {
+      this.token = undefined;
+    }
+    this.auth = { pinRequested: false, signedIn: this.token !== undefined };
     this.snapshot = {
       load: 'loading',
       now: Date.now(),
@@ -186,9 +236,18 @@ export class HttpRiego implements RiegoApi {
   /** Hora del servidor, corregida por la diferencia con el reloj local. */
   now = (): number => Date.now() + this.offsetMs;
 
-  updateSettings = (patch: Partial<Settings>): Promise<ActionResult> => this.act('PUT', '/api/settings', patch);
+  updateSettings = (patch: Partial<Settings>): Promise<ActionResult> => {
+    // La calibración de una planta la guarda el servidor al tomar sus dos puntos (`captureCalibration`): el PUT de ajustes
+    // sin planta iría a la primera, no a la que se mira.
+    if (this.scope && (patch.rawDry !== undefined || patch.rawWet !== undefined)) {
+      return Promise.resolve({ ok: false, error: 'La calibración de una planta se guarda al tomar sus dos puntos.' });
+    }
+    return this.act('PUT', '/api/settings', patch);
+  };
 
-  waterNow = (): Promise<ActionResult> => this.act('POST', '/api/water');
+  /** Con una planta a la vista riega esa; en la vista general, la primera (como siempre). */
+  waterNow = (): Promise<ActionResult> =>
+    this.scope ? this.act('POST', `/api/plants/${encodeURIComponent(this.scope)}/water`) : this.act('POST', '/api/water');
 
   testRelay = (seconds: number): Promise<ActionResult> => this.act('POST', '/api/relay/test', { seconds });
 
@@ -214,9 +273,59 @@ export class HttpRiego implements RiegoApi {
   };
 
   /** Empieza la calibración: la placa manda lecturas seguidas y acá se siguen cada 2 s. */
-  startCalibration = (): Promise<ActionResult> => this.act('POST', CAL_START);
+  startCalibration = (): Promise<ActionResult> => this.act('POST', this.calPath('start'));
 
-  stopCalibration = (): Promise<ActionResult> => this.act('POST', CAL_STOP);
+  stopCalibration = (): Promise<ActionResult> => this.act('POST', this.calPath('stop'));
+
+  /** La calibración es de la planta que se mira; sin planta a la vista, la ruta de siempre (la primera). */
+  private calPath(action: 'start' | 'stop'): string {
+    return this.scope ? `/api/plants/${encodeURIComponent(this.scope)}/calibration/${action}` : action === 'start' ? CAL_START : CAL_STOP;
+  }
+
+  captureCalibration = async (point: 'dry' | 'wet'): Promise<CaptureResult> => {
+    const path = this.scope ? `/api/plants/${encodeURIComponent(this.scope)}/calibration/capture` : '/api/calibration/capture';
+    const sent = await this.authed('POST', path, { point });
+    if ('error' in sent) return { ok: false, error: sent.error };
+    const body = await readBody(sent.res);
+    if (!sent.res.ok) return { ok: false, error: errorOf(sent.res, body) };
+    const saved = body.saved === true;
+    if (saved) await this.refresh(); // al guardar cambian rawDry y rawWet de la planta
+    return { ok: true, saved };
+  };
+
+  // --- Sectores y plantas ----------------------------------------------------------------------------------------
+
+  setPlantScope = (plantId: string | undefined): void => {
+    if (plantId === this.scope) return;
+    this.scope = plantId;
+    // Los datos de la planta anterior no se muestran mientras llegan los de la nueva.
+    this.snapshot = { ...this.snapshot, load: 'loading' };
+    for (const l of this.listeners) l();
+    void this.refresh();
+  };
+
+  getPlantScope = (): string | undefined => this.scope;
+
+  createSector = (input: SectorInput): Promise<ActionResult> => this.act('POST', '/api/sectors', input);
+
+  updateSector = (id: string, patch: Partial<SectorInput>): Promise<ActionResult> =>
+    this.act('PUT', `/api/sectors/${encodeURIComponent(id)}`, patch);
+
+  deleteSector = (id: string): Promise<ActionResult> => this.act('DELETE', `/api/sectors/${encodeURIComponent(id)}`);
+
+  createPlant = (input: PlantInput): Promise<ActionResult> => this.act('POST', '/api/plants', input);
+
+  updatePlant = (id: string, patch: PlantPatch): Promise<ActionResult> =>
+    this.act('PUT', `/api/plants/${encodeURIComponent(id)}`, patch);
+
+  setPlantSensor = (id: string, sensor: PlantSensor | null): Promise<ActionResult> =>
+    this.act('PUT', `/api/plants/${encodeURIComponent(id)}/sensor`, { sensor });
+
+  archivePlant = (id: string): Promise<ActionResult> => this.act('DELETE', `/api/plants/${encodeURIComponent(id)}`);
+
+  restorePlant = (id: string): Promise<ActionResult> => this.act('POST', `/api/plants/${encodeURIComponent(id)}/restore`);
+
+  waterPlant = (id: string): Promise<ActionResult> => this.act('POST', `/api/plants/${encodeURIComponent(id)}/water`);
 
   relayStatus = async (): Promise<RelayStatus> => {
     try {
@@ -296,19 +405,76 @@ export class HttpRiego implements RiegoApi {
     return prefs ? { ok: true, prefs } : { ok: false, error: 'El servidor respondió algo inesperado.' };
   }
 
+  // --- AuthApi -----------------------------------------------------------------
+
+  subscribeAuth = (listener: () => void): (() => void) => {
+    this.authListeners.add(listener);
+    return () => {
+      this.authListeners.delete(listener);
+    };
+  };
+
+  getAuthState = (): AuthState => this.auth;
+
+  submitPin = async (pin: string): Promise<boolean> => {
+    try {
+      const res = await this.request('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+      const body = await readBody(res);
+      if (res.ok && typeof body.token === 'string') {
+        this.saveToken(body.token);
+        this.flushPinWaiters(true);
+        this.setAuth({ pinRequested: false });
+        return true;
+      }
+      const serverMessage = typeof body.error === 'string' ? body.error : undefined;
+      this.setAuth({
+        pinRequested: this.auth.pinRequested,
+        error: loginErrorText(res.status, res.headers.get('retry-after'), serverMessage),
+      });
+      return false;
+    } catch {
+      this.setAuth({ pinRequested: this.auth.pinRequested, error: API_ERROR });
+      return false;
+    }
+  };
+
+  /** Abre el diálogo del PIN aunque la sesión siga abierta: así el PIN se pide siempre para lo sensible. */
+  confirmPin = (): Promise<boolean> => this.askPin();
+
+  /** Cierra la sesión: se olvida el token y la pantalla vuelve a la entrada. */
+  signOut = (): void => this.expireSession();
+
+  cancelPin = (): void => {
+    if (!this.auth.pinRequested) return;
+    this.flushPinWaiters(false);
+    this.setAuth({ pinRequested: false });
+  };
+
   // --- Internos ----------------------------------------------------------------
 
   /** Pide el snapshot. Si falla, deja los últimos datos con `error`. */
   async refresh(): Promise<void> {
     const id = ++this.seq;
     const t0 = Date.now();
+    const scope = this.scope;
+    const path = scope ? `/api/snapshot?plantId=${encodeURIComponent(scope)}` : '/api/snapshot';
     let next: Snapshot;
     try {
       // Prueba primero el servidor que venía andando y, si falla, los demás.
       let data: Snapshot | undefined;
       for (const i of this.order()) {
         try {
-          const res = await this.fetchOn(this.bases[i], '/api/snapshot');
+          const res = await this.fetchOn(this.bases[i], path);
+          // La planta ya no existe (se borró o se archivó en otro lado): se vuelve a la vista general.
+          if (res.status === 404 && scope !== undefined && this.scope === scope) {
+            this.scope = undefined;
+            return this.refresh();
+          }
+          if (res.status === 401) this.expireSession();
           if (!res.ok) continue;
           const body: unknown = await res.json();
           if (!isSnapshot(body)) continue;
@@ -321,13 +487,13 @@ export class HttpRiego implements RiegoApi {
       }
       if (!data) throw new Error('Ningún servidor respondió');
       const t1 = Date.now();
-      // Si llegó antes una respuesta más nueva, esta ya está vieja.
-      if (id < this.applied) return;
+      // Si llegó antes una respuesta más nueva, o se cambió de planta mientras tanto, esta ya está vieja.
+      if (id < this.applied || scope !== this.scope) return;
       this.offsetMs = data.now - (t0 + t1) / 2;
       const { error: _error, ...rest } = data;
-      next = { ...rest, load: 'ready', isDemo: false };
+      next = { ...withCalibration(rest as Snapshot, scope), load: 'ready', isDemo: false };
     } catch {
-      if (id < this.applied) return;
+      if (id < this.applied || scope !== this.scope) return;
       const prev = this.snapshot;
       next = { ...prev, load: 'ready', now: this.now(), error: API_ERROR, device: { ...prev.device, online: false } };
     }
@@ -381,6 +547,7 @@ export class HttpRiego implements RiegoApi {
           continue;
         }
         this.active = i;
+        if (res.status === 401 && path !== '/api/login') this.expireSession();
         return res;
       } catch (err) {
         failure = err;
@@ -390,8 +557,8 @@ export class HttpRiego implements RiegoApi {
     throw failure;
   }
 
-  /** Acción que cambia algo en el servidor. Lo que responde el servidor (también un error) se muestra tal cual. */
-  private async act(method: 'PUT' | 'POST', path: string, body?: unknown): Promise<ActionResult> {
+  /** Acción que cambia algo en el servidor. Si el servidor dice 401, se cierra la sesión y la acción falla. */
+  private async act(method: 'PUT' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<ActionResult> {
     const sent = await this.authed(method, path, body);
     if ('error' in sent) return { ok: false, error: sent.error };
     const result = await toResult(sent.res);
@@ -399,9 +566,9 @@ export class HttpRiego implements RiegoApi {
     return result;
   }
 
-  /** Pedido de una acción. Solo devuelve error si no hubo conexión. No refresca el snapshot. */
+  /** Pedido con el token de sesión. Ante un 401 cierra la sesión y devuelve el error. No refresca el snapshot. */
   private async authed(
-    method: 'GET' | 'PUT' | 'POST' | 'PATCH',
+    method: 'GET' | 'PUT' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
   ): Promise<{ res: Response } | { error: string }> {
@@ -410,13 +577,60 @@ export class HttpRiego implements RiegoApi {
         method,
         headers: {
           ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
     try {
-      return { res: await send() };
+      const res = await send();
+      // `request` ya cerró la sesión: la pantalla vuelve a la entrada y la acción no se da por hecha.
+      if (res.status === 401) return { error: SESSION_EXPIRED };
+      return { res };
     } catch {
       return { error: API_ERROR };
+    }
+  }
+
+  private askPin(): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.pinWaiters.push(resolve);
+      this.setAuth({ pinRequested: true });
+    });
+  }
+
+  private flushPinWaiters(ok: boolean): void {
+    const waiters = this.pinWaiters;
+    this.pinWaiters = [];
+    for (const w of waiters) w(ok);
+  }
+
+  private setAuth(next: Omit<AuthState, 'signedIn'>): void {
+    this.auth = { ...next, signedIn: this.token !== undefined };
+    for (const l of this.authListeners) l();
+  }
+
+  /** Sin sesión: se borra el token, se cierra cualquier diálogo del PIN y las acciones que esperaban fallan. */
+  private expireSession(): void {
+    this.clearToken();
+    this.flushPinWaiters(false);
+    this.setAuth({ pinRequested: false });
+  }
+
+  private saveToken(token: string): void {
+    this.token = token;
+    try {
+      this.storage?.setItem(TOKEN_KEY, token);
+    } catch {
+      // Sin almacenamiento: la sesión dura lo que dure la pestaña.
+    }
+  }
+
+  private clearToken(): void {
+    this.token = undefined;
+    try {
+      this.storage?.removeItem(TOKEN_KEY);
+    } catch {
+      // ver saveToken
     }
   }
 }

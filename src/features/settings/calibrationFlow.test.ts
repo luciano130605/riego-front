@@ -283,3 +283,65 @@ describe('CalibrationFlow: los dos pasos', () => {
     flow.dispose();
   });
 });
+
+describe('CalibrationFlow: el servidor toma los puntos (calibración de una planta)', () => {
+  /** Igual que `started`, pero la API también toma los puntos en el servidor. */
+  async function withServer(capture: (point: 'dry' | 'wet') => Promise<import('@/data/api').CaptureResult>) {
+    const f = fakeApi();
+    const api = { ...f.api, captureCalibration: vi.fn(capture) };
+    const flow = new CalibrationFlow(api);
+    flow.start();
+    await vi.advanceTimersByTimeAsync(0);
+    return { ...f, api, flow };
+  }
+
+  it('cada punto se toma también en el servidor y, si ya guardó la calibración, no se manda otro guardado', async () => {
+    const { flow, feed, api, calls } = await withServer(async (p) => ({ ok: true, saved: p === 'wet' }));
+    feed(calm(3100));
+    flow.useAsDry();
+    feed(calm(1350));
+    flow.useAsWet();
+    expect(api.captureCalibration.mock.calls).toEqual([['dry'], ['wet']]);
+    const save = vi.fn(async () => true);
+    await flow.save(save);
+    expect(save).not.toHaveBeenCalled(); // el servidor ya la guardó con los dos puntos
+    expect(flow.getState()).toMatchObject({ phase: 'ended', end: 'saved' });
+    expect(calls).toEqual(['start', 'stop']);
+  });
+
+  it('si el servidor rechaza un punto, no se da por guardada y se muestra su motivo', async () => {
+    const { flow, feed } = await withServer(async (p) =>
+      p === 'dry' ? { ok: true, saved: false } : { ok: false, error: 'Las lecturas se mueven: esperá a que se estabilicen.' },
+    );
+    feed(calm(3100));
+    flow.useAsDry();
+    feed(calm(1350));
+    flow.useAsWet();
+    const save = vi.fn(async () => true);
+    await flow.save(save);
+    expect(save).not.toHaveBeenCalled();
+    expect(flow.getState()).toMatchObject({ phase: 'running', saving: false, problem: 'Las lecturas se mueven: esperá a que se estabilicen.' });
+  });
+
+  it('si el servidor tomó los dos pero no la guardó, lo avisa en vez de dar por guardado', async () => {
+    const { flow, feed } = await withServer(async () => ({ ok: true, saved: false }));
+    feed(calm(3100));
+    flow.useAsDry();
+    feed(calm(1350));
+    flow.useAsWet();
+    await flow.save(vi.fn(async () => true));
+    expect(flow.getState().problem).toMatch(/todavía no tiene los dos puntos/);
+    expect(flow.getState().phase).toBe('running');
+  });
+
+  it('sin captura en el servidor (el simulador) se guarda como siempre con updateSettings', async () => {
+    const { flow, feed } = await started();
+    feed(calm(3100));
+    flow.useAsDry();
+    feed(calm(1350));
+    flow.useAsWet();
+    const save = vi.fn(async () => true);
+    await flow.save(save);
+    expect(save).toHaveBeenCalledWith({ rawDry: 3100, rawWet: 1350 });
+  });
+});

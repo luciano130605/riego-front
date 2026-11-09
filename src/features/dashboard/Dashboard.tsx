@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { formatAgo } from '@/core/format';
 import { useAutomation, useDerived, useSnapshot } from '@/data/hooks';
 import { ChartCarousel } from '@/features/chart/ChartCarousel';
@@ -10,11 +10,20 @@ import { NeedsWaterBanner } from '@/features/irrigation/NeedsWaterBanner';
 import { MoistureCard } from '@/features/moisture/MoistureCard';
 import { SettingsDialog, type TabId } from '@/features/settings/SettingsDialog';
 import { LastWatering, OperationMode, WeeklyWatering } from '@/features/summary/SummaryCards';
-import { Header } from './Header';
+import { Header, type HeaderTitle } from './Header';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { AlertDiamondIcon } from '@hugeicons/core-free-icons';
 
-export function Dashboard() {
+type Props = {
+  /** Título y link de "volver" (para el detalle de una planta). */
+  header?: HeaderTitle;
+  /** Barra de la planta (cambiar de planta, automático propio), justo debajo del encabezado. */
+  bar?: ReactNode;
+  /** Lo que se ve en vez del tablero cuando la planta no tiene sensor. */
+  noSensor?: ReactNode;
+};
+
+export function Dashboard({ header, bar, noSensor }: Props = {}) {
   const snapshot = useSnapshot();
   const { reading } = useDerived();
   const auto = useAutomation();
@@ -34,53 +43,61 @@ export function Dashboard() {
 
   return (
     <div className="mx-auto flex w-full max-w-[1240px] flex-col gap-5 px-4 py-6 sm:px-8 sm:py-9">
-      <Header onOpenSettings={openSettings} />
+      <Header onOpenSettings={openSettings} {...header} />
 
-      {snapshot.error && (
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-control border border-alert/35 bg-alert/10 px-4 py-3 text-[15px]"
-        >
-          <HugeiconsIcon icon={AlertDiamondIcon} size={18} aria-hidden className="mt-0.5 shrink-0 text-alert" />
-          <p>
-            <span className="font-medium">{snapshot.error}</span>{' '}
-            <span className="text-ink-2">
-              Estás viendo los últimos datos conocidos
-              {reading ? ` (${formatAgo(snapshot.now - reading.t)})` : ''} y no se puede regar ni cambiar ajustes hasta
-              que vuelva la conexión.
-            </span>
-          </p>
-        </div>
+      {bar}
+
+      {noSensor ? (
+        noSensor
+      ) : (
+        <>
+          {snapshot.error && (
+            <div
+              role="alert"
+              className="flex items-start gap-3 rounded-control border border-alert/35 bg-alert/10 px-4 py-3 text-[15px]"
+            >
+              <HugeiconsIcon icon={AlertDiamondIcon} size={18} aria-hidden className="mt-0.5 shrink-0 text-alert" />
+              <p>
+                <span className="font-medium">{snapshot.error}</span>{' '}
+                <span className="text-ink-2">
+                  Estás viendo los últimos datos conocidos
+                  {reading ? ` (${formatAgo(snapshot.now - reading.t)})` : ''} y no se puede regar ni cambiar ajustes hasta
+                  que vuelva la conexión.
+                </span>
+              </p>
+            </div>
+          )}
+
+          <WifiBanner />
+
+          <NeedsWaterBanner />
+
+          <main className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            {/* Sin tarjeta de riego (manual), la humedad ocupa todo el ancho: no queda ningún hueco. */}
+            <MoistureCard className={showRiego ? undefined : 'lg:col-span-2'} />
+            {showRiego && (
+              <div className="grid min-w-0 grid-cols-2 gap-3 lg:flex lg:flex-col lg:gap-5 [&>*:only-child]:col-span-2 lg:[&>*:only-child]:flex-1">
+                <IrrigationControl />
+                {auto.show.nextWatering && <AutomationStatus onOpenSettings={openSettings} className="flex-1" />}
+              </div>
+            )}
+
+            <ChartCarousel labels={['Últimas 24 horas', 'Últimos 7 días']}>
+              <MoistureChart title="Últimas 24 horas" range="24h" {...chart} />
+              <MoistureChart title="Últimos 7 días" range="7d" {...chart} />
+            </ChartCarousel>
+          </main>
+
+          <section
+            aria-label="Resumen"
+            className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-5 [&>*:last-child]:col-span-2 md:[&>*:last-child]:col-span-1"
+          >
+            <WeeklyWatering />
+            <LastWatering />
+            <OperationMode />
+          </section>
+        </>
       )}
-
-      <WifiBanner />
-
-      <NeedsWaterBanner />
-
-      <main className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* Sin tarjeta de riego (manual), la humedad ocupa todo el ancho: no queda ningún hueco. */}
-        <MoistureCard className={showRiego ? undefined : 'lg:col-span-2'} />
-        {showRiego && (
-          <div className="grid min-w-0 grid-cols-2 gap-3 lg:flex lg:flex-col lg:gap-5 [&>*:only-child]:col-span-2 lg:[&>*:only-child]:flex-1">
-            <IrrigationControl />
-            {auto.show.nextWatering && <AutomationStatus onOpenSettings={openSettings} className="flex-1" />}
-          </div>
-        )}
-
-        <ChartCarousel labels={['Últimas 24 horas', 'Últimos 7 días']}>
-          <MoistureChart title="Últimas 24 horas" range="24h" {...chart} />
-          <MoistureChart title="Últimos 7 días" range="7d" {...chart} />
-        </ChartCarousel>
-      </main>
-
-      <section
-        aria-label="Resumen"
-        className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-5 [&>*:last-child]:col-span-2 md:[&>*:last-child]:col-span-1"
-      >
-        <WeeklyWatering />
-        <LastWatering />
-        <OperationMode />
-      </section>
 
       <SettingsDialog
         open={settings.open}

@@ -37,9 +37,13 @@ export type AutomationView = {
   subtitle: string;
 };
 
-export function automationView(s: Pick<Snapshot, 'load' | 'settings'>): AutomationView {
+/**
+ * `plantAuto`: el interruptor Automático de la planta que se mira (sin planta a la vista, no cuenta). Para regar solo
+ * hacen falta los dos: el general (`settings.auto`) y el de la planta.
+ */
+export function automationView(s: Pick<Snapshot, 'load' | 'settings'>, plantAuto?: boolean): AutomationView {
   const loading = s.load !== 'ready';
-  const autoEnabled = !loading && s.settings.auto;
+  const autoEnabled = !loading && s.settings.auto && (plantAuto ?? true);
   return {
     loading,
     autoEnabled,

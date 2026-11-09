@@ -35,7 +35,8 @@ export function validateQuietHours(q: Pick<QuietHours, 'from' | 'to'>): { ok: tr
 export function quietHoursToSave(
   s: Pick<Settings, 'quietHours'>,
   patch: Partial<Pick<QuietHours, 'enabled' | 'from' | 'to'>>,
-  browserTz: string | undefined = localTimeZone(),
+  // `null` = sin zona del navegador (a diferencia de no pasarla, que la lee).
+  browserTz: string | null | undefined = localTimeZone(),
 ): QuietHours {
   const base = quietHoursOf(s);
   return { ...base, tz: s.quietHours?.tz ?? browserTz ?? base.tz, ...patch };
