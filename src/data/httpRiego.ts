@@ -3,6 +3,7 @@ import type { Settings, Snapshot } from '@/core/types';
 import {
   PUSH_KINDS,
   type ActionResult,
+  type DeviceTestDetails,
   type DeviceTestResult,
   type PushKeyResult,
   type PushKind,
@@ -200,7 +201,16 @@ export class HttpRiego implements RiegoApi {
     if ('error' in sent) return { ok: false, error: sent.error };
     const body = await readBody(sent.res);
     if (!sent.res.ok) return { ok: false, error: errorOf(sent.res, body) };
-    return { ok: true, message: typeof body.message === 'string' && body.message ? body.message : 'Prueba enviada.' };
+    const message = typeof body.message === 'string' && body.message ? body.message : 'Prueba enviada.';
+    const action = body.action === 'ring' || body.action === 'toggle' || body.action === 'status-only' ? body.action : undefined;
+    const details: DeviceTestDetails = {
+      ...(action ? { action } : {}),
+      ...(typeof body.deviceName === 'string' && body.deviceName ? { deviceName: body.deviceName } : {}),
+      ...(typeof body.code === 'string' ? { code: body.code } : {}),
+      ...(typeof body.before === 'boolean' ? { before: body.before } : {}),
+      ...(typeof body.seconds === 'number' ? { seconds: body.seconds } : {}),
+    };
+    return { ok: true, message, ...(Object.keys(details).length > 0 ? { details } : {}) };
   };
 
   /** Empieza la calibración: la placa manda lecturas seguidas y acá se siguen cada 2 s. */

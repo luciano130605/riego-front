@@ -36,6 +36,48 @@ export type WaterEvent = {
  */
 export type WateringMode = 'until-target' | 'fixed';
 
+/**
+ * "No molestar": con la ventana activa no se manda ninguna notificación (los avisos igual quedan en la campana, marcados
+ * `silenced`). `from` y `to` son 'HH:mm' en la zona `tz` (IANA); la ventana puede cruzar la medianoche. Al terminar se arma
+ * un solo resumen de la noche.
+ */
+export type QuietHours = { enabled: boolean; from: string; to: string; tz: string };
+
+/**
+ * Resumen de la noche: lo arma el servidor al terminar la ventana de "No molestar". Todos los campos son opcionales: lo
+ * que falte no se muestra.
+ */
+export type NightSummary = {
+  /** Desde y hasta cuándo cubre (ms desde epoch). */
+  from?: number;
+  to?: number;
+  /** Humedad (%) al empezar y al terminar la noche, y la mínima. */
+  moistureStart?: number;
+  moistureEnd?: number;
+  moistureMin?: number;
+  /** Cuántos avisos de riego (humedad bajo el umbral) hubo. */
+  wateringAlerts?: number;
+  /** Riegos de la noche: los que hizo el automático y los que se anotaron a mano. */
+  wateringsAuto?: number;
+  wateringsManual?: number;
+  /** Minutos que la placa estuvo sin conexión. */
+  offlineMin?: number;
+  /** Cuántos problemas del sensor hubo. */
+  sensorIssues?: number;
+};
+
+/**
+ * Un aviso que el servidor registró (los de la campana). `silenced`: salió dentro de "No molestar", así que no llegó
+ * como notificación al celular. El tipo 'night-summary' trae el `summary`.
+ */
+export type Incident = {
+  t: number;
+  kind: string;
+  message: string;
+  silenced?: boolean;
+  summary?: NightSummary;
+};
+
 export type Settings = {
   /** Si está en true, el sistema riega solo cuando corresponde. */
   auto: boolean;
@@ -60,6 +102,8 @@ export type Settings = {
   rawDry: number;
   /** Lectura cruda con la tierra mojada (calibración). */
   rawWet: number;
+  /** No molestar. Opcional: un servidor viejo no lo manda y se toma el valor por defecto (apagado). */
+  quietHours?: QuietHours;
 };
 
 /** Por qué el sensor de humedad no sirve: señal con ruido, lectura muy baja o lectura muy alta. */
@@ -132,6 +176,8 @@ export type RelayLink = {
   connected: boolean;
   /** true si hay un regador al que se le puede mandar una prueba (el botón "Probar dispositivo"). */
   testAvailable?: boolean;
+  /** Nombre del dispositivo de prueba en Smart Life, si lo trae. */
+  testDeviceName?: string;
 };
 
 export type Snapshot = {
@@ -144,6 +190,8 @@ export type Snapshot = {
   events: WaterEvent[];
   settings: Settings;
   device: DeviceStatus;
+  /** Avisos registrados por el servidor (campana), del más nuevo al más viejo. Un servidor viejo no los manda. */
+  incidents?: Incident[];
   /** El regador y si está conectado. Un backend viejo no lo manda: entonces no se muestra nada. */
   relayStatus?: RelayLink;
   /** Igual que `relayStatus` (el backend manda los dos). */

@@ -1,6 +1,7 @@
 import { decideWatering } from '@/core/decide';
 import { clamp, percentToRaw, rawToPercent } from '@/core/moisture';
-import type { DeviceCalibration, Reading, SensorStatus, Settings, Snapshot, WaterEvent } from '@/core/types';
+import type { DeviceCalibration, Incident, NightSummary, Reading, SensorStatus, Settings, Snapshot, WaterEvent } from '@/core/types';
+import { quietHoursOf, validateQuietHours } from '@/core/quietHours';
 import { DEFAULT_SETTINGS, READ_EVERY_MIN, sanitizeSettings } from '@/core/settings';
 import {
   type ActionResult,
@@ -69,15 +70,21 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+/** El simulador arranca con "No molestar" prendido, para que se vean el resumen de la noche y los avisos silenciados. */
+const DEMO_SETTINGS: Settings = {
+  ...DEFAULT_SETTINGS,
+  quietHours: { ...quietHoursOf(DEFAULT_SETTINGS), enabled: true },
+};
+
 function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
+    if (!raw) return DEMO_SETTINGS;
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return DEFAULT_SETTINGS;
-    return sanitizeSettings(DEFAULT_SETTINGS, parsed as Partial<Settings>);
+    if (typeof parsed !== 'object' || parsed === null) return DEMO_SETTINGS;
+    return sanitizeSettings(DEMO_SETTINGS, parsed as Partial<Settings>);
   } catch {
-    return DEFAULT_SETTINGS;
+    return DEMO_SETTINGS;
   }
 }
 
@@ -183,6 +190,11 @@ export class MockRiego implements RiegoApi, LabApi {
 
   updateSettings = (patch: Partial<Settings>): Promise<ActionResult> => {
     if (this.fault === 'api-error') return Promise.resolve({ ok: false, error: API_ERROR });
+    if (patch.quietHours) {
+      // Igual que el servidor: una ventana con "desde" igual a "hasta" (o una hora mal escrita) se rechaza, no se ignora.
+      const check = validateQuietHours({ ...quietHoursOf(this.settings), ...patch.quietHours });
+      if (!check.ok) return Promise.resolve({ ok: false, error: check.error });
+    }
     this.settings = sanitizeSettings(this.settings, patch);
     saveSettings(this.settings);
     this.publish();
@@ -207,7 +219,11 @@ export class MockRiego implements RiegoApi, LabApi {
   testDevice = (): Promise<DeviceTestResult> =>
     new Promise((resolve) => {
       setTimeout(() => {
-        resolve(this.fault === 'api-error' ? { ok: false, error: API_ERROR } : { ok: true, message: 'Prueba simulada' });
+        resolve(
+          this.fault === 'api-error'
+            ? { ok: false, error: API_ERROR }
+            : { ok: true, message: 'Prueba simulada', details: { action: 'toggle', code: 'switch_1', before: false } },
+        );
       }, 800);
     });
 
@@ -583,6 +599,7 @@ export class MockRiego implements RiegoApi, LabApi {
         ...(last ? { uptimeSec: Math.max(0, Math.round((last.t - this.bootAt) / 1000)) } : {}),
         ...(this.cal ? { calibration: this.calibrationState() } : {}),
       },
+      incidents: this.demoIncidents(t),
       relayStatus: { driver: 'fake', connected: true, testAvailable: true },
       relay: { driver: 'fake', connected: true, testAvailable: true },
       isDemo: true,
@@ -591,6 +608,58 @@ export class MockRiego implements RiegoApi, LabApi {
       this.fault === 'api-error' && this.frozen
         ? { ...this.frozen, now: t, error: API_ERROR, device: { ...this.frozen.device, online: false } }
         : built;
+  }
+
+  /**
+   * Avisos de ejemplo para la campana: los cruces del umbral de las lecturas simuladas (el último par sale silenciado,
+   * como si hubiera caído en "No molestar") y el resumen de la noche que terminó hoy a las 07:00.
+   */
+  private demoIncidents(now: number): Incident[] {
+    const th = this.settings.thresholdPct;
+    const out: Incident[] = [];
+    const crossings: Incident[] = [];
+    let prev: RawSample | undefined;
+    for (const sample of this.samples) {
+      const r = this.toReading(sample);
+      const p = prev ? this.toReading(prev) : undefined;
+      if (p && p.moisture >= th && r.moisture < th) {
+        crossings.push({ t: r.t, kind: 'humedad-baja', message: `La humedad bajó de ${th} %` });
+      } else if (p && p.moisture < th && r.moisture >= th) {
+        crossings.push({ t: r.t, kind: 'humedad-recuperada', message: `La humedad volvió a superar ${th} %` });
+      }
+      prev = sample;
+    }
+    // Los dos últimos cruces (bajó y volvió a subir) son los silenciados de la demo.
+    crossings.slice(-2).forEach((c) => (c.silenced = true));
+    out.push(...crossings);
+
+    // La noche que terminó a las 07:00 de hoy (o de ayer, si todavía no pasaron las 07:00): de 23:00 a 07:00.
+    const end = new Date(now);
+    end.setHours(7, 0, 0, 0);
+    if (end.getTime() > now) end.setDate(end.getDate() - 1);
+    const to = end.getTime();
+    const from = to - 8 * 60 * MIN;
+    const night = this.samples.filter((x) => x.t >= from && x.t <= to).map((x) => this.toReading(x));
+    const inNight = (t: number) => t >= from && t <= to;
+    const summary: NightSummary = {
+      from,
+      to,
+      ...(night.length > 0
+        ? {
+            moistureStart: night[0].moisture,
+            moistureEnd: night[night.length - 1].moisture,
+            moistureMin: Math.min(...night.map((x) => x.moisture)),
+          }
+        : {}),
+      wateringAlerts: crossings.filter((c) => c.kind === 'humedad-baja' && inNight(c.t)).length,
+      wateringsAuto: this.events.filter((e) => e.source === 'auto' && inNight(e.t)).length,
+      wateringsManual: this.events.filter((e) => e.source === 'manual' && inNight(e.t)).length,
+      // Datos de prueba: la placa se desconectó un rato para que se vea la línea.
+      offlineMin: 12,
+      sensorIssues: 0,
+    };
+    out.push({ t: to, kind: 'night-summary', message: 'Resumen de la noche', summary });
+    return out.sort((a, b) => b.t - a.t);
   }
 
   private notify(): void {

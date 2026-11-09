@@ -1,4 +1,4 @@
-import type { DeviceTestResult, RiegoApi } from '@/data/api';
+import type { DeviceTestDetails, DeviceTestResult, RiegoApi } from '@/data/api';
 
 /**
  * Estado del botón "Probar dispositivo". No usa React: evita el doble clic (mientras prueba ignora más pedidos), no da
@@ -7,7 +7,7 @@ import type { DeviceTestResult, RiegoApi } from '@/data/api';
 export type DeviceTestState =
   | { phase: 'idle' }
   | { phase: 'testing' }
-  | { phase: 'ok'; message: string }
+  | { phase: 'ok'; message: string; details?: DeviceTestDetails }
   | { phase: 'error'; error: string };
 
 /** Cuánto queda a la vista el mensaje de éxito. */
@@ -42,7 +42,7 @@ export class DeviceTest {
     }
     if (!this.alive) return;
     if (res.ok) {
-      this.set({ phase: 'ok', message: res.message });
+      this.set({ phase: 'ok', message: res.message, ...(res.details ? { details: res.details } : {}) });
       this.timer = setTimeout(() => this.set({ phase: 'idle' }), OK_VISIBLE_MS);
     } else {
       this.set({ phase: 'error', error: res.error });

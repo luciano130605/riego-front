@@ -6,7 +6,21 @@ import type { Settings, Snapshot } from '@/core/types';
  * misma forma que hable por HTTP y no cambia ningún componente.
  */
 /** Resultado de la prueba del dispositivo: el texto sale del servidor. */
-export type DeviceTestResult = { ok: true; message: string } | { ok: false; error: string };
+export type DeviceTestResult =
+  | { ok: true; message: string; details?: DeviceTestDetails }
+  | { ok: false; error: string };
+
+/** Lo que hizo la prueba, si el servidor lo informa (si no, se muestra solo su `message`). */
+export type DeviceTestDetails = {
+  action?: 'ring' | 'toggle' | 'status-only';
+  /** Nombre del dispositivo en Smart Life. */
+  deviceName?: string;
+  /** Función accionada, por ejemplo `switch_1`. */
+  code?: string;
+  /** Cómo estaba antes de la prueba (true = prendida). */
+  before?: boolean;
+  seconds?: number;
+};
 
 export interface RiegoApi {
   subscribe(listener: () => void): () => void;

@@ -472,3 +472,30 @@ export const AUTO_MODE = {
   avisoOffDetail: 'Avisos apagados. El riego es manual.',
 } as const;
 
+// --- No molestar y resumen de la noche --------------------------------------------------------------------------
+
+export const QUIET = {
+  section: 'No molestar',
+  label: 'No molestar',
+  from: 'Desde',
+  to: 'Hasta',
+  /** La ventana vigente. */
+  window: (from: string, to: string): string => `De ${from} a ${to}`,
+  hintOn: (from: string, to: string): string =>
+    `De ${from} a ${to}. En ese horario no te mandamos notificaciones y a la mañana te llega un resumen de la noche.`,
+  hintOff: (from: string, to: string): string =>
+    `Apagado. Si lo prendés, de ${from} a ${to} no te mandamos notificaciones y a la mañana te llega un resumen de la noche.`,
+  sameTime: '“Desde” y “hasta” no pueden ser la misma hora.',
+  invalidTime: 'Elegí una hora válida.',
+  on: 'No molestar activado.',
+  off: 'No molestar desactivado.',
+  saved: 'Horario guardado.',
+} as const;
+
+export const BELL = {
+  nightSummary: 'Resumen de la noche',
+  silenced: 'silenciado',
+  dismiss: 'Descartar aviso',
+  dismissSummary: 'Descartar el resumen de la noche',
+} as const;
+

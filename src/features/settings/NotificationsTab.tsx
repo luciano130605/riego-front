@@ -6,6 +6,7 @@ import { Switch } from '@/ui/Switch';
 import { useToast } from '@/ui/toastContext';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Alert02Icon, CheckmarkCircle02Icon, Notification01Icon } from '@hugeicons/core-free-icons';
+import { QuietHoursSection } from './QuietHoursSection';
 import { SettingRow, SettingsSection } from './SettingRow';
 import { testAllKinds } from './pushTestAll';
 import { usePushSubscription } from './usePushSubscription';
@@ -131,6 +132,8 @@ export function NotificationsTab() {
           </SettingRow>
         )}
       </SettingsSection>
+
+      <QuietHoursSection />
 
       <SettingsSection title="Qué querés que te llegue">
         {PUSH_KINDS.map((kind) => (

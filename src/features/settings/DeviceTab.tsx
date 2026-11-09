@@ -23,6 +23,7 @@ import { CalibrationSection } from './CalibrationSection';
 import { deviceProblems } from './deviceProblems';
 import { Button } from '@/ui/Button';
 import { DeviceTest } from './deviceTest';
+import { testHint, testResultText } from './deviceTestCopy';
 import { SettingsSection } from './SettingRow';
 
 type Props = { save: (patch: Partial<Settings>, okMessage?: string) => Promise<boolean> };
@@ -183,6 +184,7 @@ function TestDeviceButton() {
   }, [test]);
   const state = useSyncExternalStore(test.subscribe, test.getState, test.getState);
   const testing = state.phase === 'testing';
+  const name = useSnapshot().relay?.testDeviceName;
 
   return (
     <div className="mt-3 border-t border-line pt-3">
@@ -195,11 +197,12 @@ function TestDeviceButton() {
         />
         {testing ? 'Probando…' : 'Probar dispositivo'}
       </Button>
+      <p className="mt-2 text-sm text-ink-2">{testHint(name)}</p>
       <p role="status" aria-live="polite" className="mt-2 min-h-5 text-sm">
         {state.phase === 'ok' && (
           <span className="inline-flex items-start gap-2 text-ok">
             <HugeiconsIcon icon={CheckmarkCircle02Icon} size={16} aria-hidden className="mt-0.5 shrink-0" />
-            {state.message}
+            {testResultText(state.message, state.details, name)}
           </span>
         )}
         {state.phase === 'error' && (

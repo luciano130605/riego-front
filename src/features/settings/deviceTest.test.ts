@@ -78,6 +78,6 @@ describe('DeviceTest', () => {
     expect(t.getState().phase).toBe('testing');
     await vi.advanceTimersByTimeAsync(1);
     await run;
-    expect(t.getState()).toEqual({ phase: 'ok', message: 'Prueba simulada' });
+    expect(t.getState()).toMatchObject({ phase: 'ok', message: 'Prueba simulada', details: { action: 'toggle', code: 'switch_1' } });
   });
 });

@@ -465,3 +465,19 @@ describe('HttpRiego: calibración', () => {
     expect(calls.length).toBe(n);
   });
 });
+
+describe('HttpRiego: probar dispositivo (detalle)', () => {
+  it('lee el nombre, la toma y cómo estaba antes', async () => {
+    const { fn } = makeFetch((c) =>
+      c.path === '/api/relay/test'
+        ? json({ ok: true, message: 'Conexión verificada.', action: 'toggle', deviceName: 'Tapa Enchufe Lucho Escritorio', code: 'switch_1', before: false, seconds: 2 })
+        : json(serverSnapshot()),
+    );
+    const api = new HttpRiego(BASE, { fetch: fn });
+    expect(await api.testDevice()).toEqual({
+      ok: true,
+      message: 'Conexión verificada.',
+      details: { action: 'toggle', deviceName: 'Tapa Enchufe Lucho Escritorio', code: 'switch_1', before: false, seconds: 2 },
+    });
+  });
+});
