@@ -351,6 +351,61 @@ curl -X POST $URL/api/water -H "Authorization: Bearer $SESSION"
 
 Con `RELAY_DRIVER=fake` el riego queda registrado como evento pero no se prende nada.
 
+## Google Home (integración nube a nube)
+
+Permite ver la humedad de cada planta y prender o apagar el regador desde Google Home. Todo vive bajo `/api/google/*` y
+**queda apagado si faltan las variables** (esas rutas responden 404 y el resto del backend arranca igual).
+
+| Variable | Obligatoria | Descripción |
+| --- | --- | --- |
+| `GOOGLE_CLIENT_ID` | las tres van juntas | Client ID que le das a Google (lo inventás vos). |
+| `GOOGLE_CLIENT_SECRET` | las tres van juntas | Client secret, **32 caracteres o más** (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). |
+| `GOOGLE_PROJECT_ID` | las tres van juntas | Id del proyecto de la Google Home Developer Console. Define las únicas `redirect_uri` aceptadas. |
+| `GOOGLE_MAX_WATER_PER_HOUR` | no | Riegos por hora que se pueden pedir desde Google (por defecto 3). Al superarlo: `actionNotAvailable` y un incidente en la campana. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | no | Clave JSON de una cuenta de servicio (Home Graph API). Habilita Request Sync y Report State. |
+
+### Pasos en la Google Home Developer Console
+
+1. En [console.home.google.com](https://console.home.google.com) creá un proyecto y agregá una integración **Cloud-to-cloud**. Copiá el **Project ID** a `GOOGLE_PROJECT_ID`.
+2. **Nombre** de la integración (por ejemplo `riego-aut`), **tipo de dispositivo**: *Sprinkler* y *Sensor*, e **ícono** PNG de 144x144.
+3. **Account linking** (OAuth, authorization code):
+   - **Client ID** y **Client secret**: los mismos valores de `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`.
+   - **Authorization URL**: `PUBLIC_URL/api/google/authorize`
+   - **Token URL**: `PUBLIC_URL/api/google/token`
+4. **Cloud fulfillment URL**: `PUBLIC_URL/api/google/fulfillment`
+5. Guardá y, desde la app Google Home del celular, *Agregar dispositivo > Funciona con Google Home* y buscá `[test] <nombre>`.
+   Se abre la página "Vincular riego-aut con Google": ingresás el **PIN** (el mismo `ADMIN_PIN`) y listo.
+6. *(Opcional)* Para que Google se entere solo de los cambios: en Google Cloud, habilitá la **HomeGraph API** en ese mismo proyecto,
+   creá una cuenta de servicio con una clave JSON y pegá el JSON entero en `GOOGLE_SERVICE_ACCOUNT_JSON`. Google exige Report
+   State y Request Sync para **publicar** la integración; para uso propio en modo prueba no hacen falta.
+
+### Qué expone
+
+- **Un sensor por cada planta activa con sensor** (`planta-<id>`, tipo `SENSOR`, trait `HumiditySetting` de solo lectura; el sector va
+  como sugerencia de ambiente). La humedad es la misma `moisture` del snapshot, redondeada (Google exige de 1 a 100: un 0 % se informa
+  como 1). Sin una lectura válida reciente figura **sin conexión**, sin valores inventados.
+- **El regador** (`regador`, tipo `SPRINKLER`, trait `StartStop`, sin zonas ni pausa). "Prender" usa el mismo camino que
+  `POST /api/water` (`watering.ts`, origen manual, `waterSeconds`, candado y `RELAY_HARD_MAX_SECONDS`, evento antes de la orden).
+  "Apagar" corta el riego ya por el apagado del relé y limpia el apagado pendiente.
+- Errores (solo de la lista oficial): `alreadyStarted`, `alreadyStopped`, `actionNotAvailable` (modo aviso, tope por hora o un regador
+  que no se puede cortar), `deviceOffline` (el regador no responde), `deviceNotFound`, `functionNotSupported`.
+
+### Seguridad
+
+- La vinculación es un servidor OAuth 2.0 propio: la página pide el **PIN** (misma comparación y mismo límite de intentos que
+  `/api/login`; no usa Google Sign-In). Solo acepta `redirect_uri` =
+  `https://oauth-redirect.googleusercontent.com/r/<GOOGLE_PROJECT_ID>` o la de `oauth-redirect-sandbox`; si algo no coincide responde 400 y no redirige.
+- Código de autorización: 32 bytes aleatorios, un solo uso, 10 minutos, atado al cliente y a la `redirect_uri`. Access token de 1 hora;
+  el refresh token no vence pero se revoca (al desvincular desde Google, o si un código se reusa). **En la base solo hay hashes**
+  (colecciones `googleCodes` y `googleTokens`).
+- El `agentUserId` es un id aleatorio y estable guardado en `config`; no sale del PIN ni de ningún secreto.
+- Nunca se loguean tokens, códigos, el client secret ni el PIN; el log de pedidos quita la query de `/api/google/authorize`.
+  Estas rutas no llevan CORS (no las llama la pantalla) y la página no se puede embeber en un iframe.
+- Con `GOOGLE_SERVICE_ACCOUNT_JSON`: Request Sync al crear, renombrar, archivar o restaurar una planta o cambiarle el sensor, y Report
+  State con cada lectura y cuando un riego empieza o termina. Si Google falla se loguea y se sigue: nunca frena una lectura ni un riego.
+
+*Probado con tests (MongoDB en memoria, relé simulado y Home Graph simulada); todavía no contra Google real.*
+
 ## Sonoff por eWeLink (`RELAY_DRIVER=ewelink`)
 
 **Modo ejemplo.** Si las credenciales son las de ejemplo de la plantilla (EWELINK_APP_ID=123, EWELINK_APP_SECRET=12345678, EWELINK_DEVICE_ID=ejemplo), el backend no habla con eWeLink (usa un relé de mentira), GET /api/relay/status devuelve xample: true y la pantalla muestra datos inventados (el simulador). Al reemplazarlas por las reales se conecta al Sonoff de verdad y la pantalla vuelve a mostrar los datos del backend.
